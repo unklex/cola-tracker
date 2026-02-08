@@ -1,0 +1,6 @@
+{
+    "name": "Backend API Specification",
+    "description": "Documentation of the Cola Tracker FastAPI backend endpoints, data models, and authentication.",
+    "version": "1.0",
+    "last_updated": "2026-02-06"
+}

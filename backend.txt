@@ -1,0 +1,456 @@
+# ===== ИМПОРТЫ =====
+from fastapi import FastAPI, HTTPException, Depends, Header, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi import Security
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from typing import Optional, List
+from datetime import datetime
+import json
+import os
+import shutil
+
+# ===== СОЗДАЁМ ПРИЛОЖЕНИЕ FASTAPI =====
+# Инициализация FastAPI приложения с метаданными
+app = FastAPI(title="Cola Tracker API", version="2.0")
+
+# Создаём объект для работы с Bearer токенами авторизации
+security = HTTPBearer()
+
+
+# ===== НАСТРОЙКА CORS (чтобы работало с Android) =====
+# Добавляем CORS middleware для разрешения кросс-доменных запросов
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Разрешаем запросы с любого адреса (для разработки)
+    allow_credentials=True,
+    allow_methods=["*"],  # Разрешаем все HTTP методы (GET, POST, PUT, DELETE и т.д.)
+    allow_headers=["*"],  # Разрешаем все заголовки
+)
+
+# ===== КОНСТАНТЫ =====
+# Файл для хранения всех данных приложения в формате JSON
+DATA_FILE = "data.json"
+
+# Папка для сохранения загруженных фотографий детей
+PHOTOS_DIR = "photos"
+
+# Множество разрешённых расширений для загружаемых изображений
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+# ===== PYDANTIC МОДЕЛИ (Схемы данных) =====
+# Модель для запроса на добавление записи о выпитом напитке
+class DrinkRequest(BaseModel):
+    amount_ml: int  # Количество выпитого в миллилитрах
+
+    # Конфигурация модели с примером для документации
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"amount_ml": 330}  # Пример: банка колы 330 мл
+        }
+    )
+
+
+# Модель для ответа с данными о ребёнке
+class ChildResponse(BaseModel):
+    """Модель для ответа с данными о ребёнке."""
+    id: int  # Уникальный идентификатор ребёнка
+    name: str  # Имя ребёнка
+    photo_url: Optional[str] = None  # URL фотографии (опционально, может быть None)
+    monthly_limit: int  # Месячный лимит напитка в мл
+    consumed_this_month: int  # Сколько уже выпито в текущем месяце
+    remaining: int  # Остаток на месяц (накапливается!)
+
+
+# Модель для записи в истории потребления напитков
+class DrinkHistoryItem(BaseModel):
+    """Модель для записи в истории выпитого."""
+    id: int  # Уникальный идентификатор записи в истории
+    child_id: int  # ID ребёнка, которому принадлежит запись
+    amount_ml: int  # Количество выпитого в мл
+    timestamp: str  # Временная метка в формате ISO строки
+
+# ===== СОЗДАЁМ ПАПКУ ДЛЯ ФОТО =====
+# Проверяем существование папки для фотографий и создаём при необходимости
+if not os.path.exists(PHOTOS_DIR):
+    os.makedirs(PHOTOS_DIR)  # Создаём папку рекурсивно
+    print(f"[INFO] Создана папка '{PHOTOS_DIR}' для фотографий")
+
+# ===== ФУНКЦИИ ДЛЯ РАБОТЫ С ДАННЫМИ =====
+
+def load_data() -> dict:
+    """Загружает данные из JSON файла в словарь Python."""
+    try:
+        # Открываем файл для чтения с указанием кодировки UTF-8
+        with open(DATA_FILE, 'r', encoding='utf-8') as f:
+            # Парсим JSON и преобразуем в Python словарь
+            data = json.load(f)
+            return data
+    except FileNotFoundError:
+        # Если файл не существует, создаём базовую структуру данных
+        print(f"[WARNING] Файл {DATA_FILE} не найден. Создаю базовую структуру.")
+        base_data = {
+            "auth_token": "REDACTED_OLD_TOKEN",  # Токен авторизации по умолчанию
+            "children": [],  # Пустой список детей
+            "drinks_history": [],  # Пустая история потребления
+            "last_reset_date": datetime.now().date().isoformat()  # Дата последнего обновления лимитов
+        }
+        save_data(base_data)  # Сохраняем базовую структуру в файл
+        return base_data
+    except json.JSONDecodeError as e:
+        # Если файл содержит некорректный JSON
+        print(f"[ERROR] Ошибка при чтении JSON: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка чтения данных")
+
+
+def save_data(data: dict):
+    """Сохраняет Python словарь в JSON файл с форматированием."""
+    try:
+        # Открываем файл для записи
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            # Сериализуем словарь в JSON с отступами для читаемости
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        # Обработка любых ошибок записи
+        print(f"[ERROR] Ошибка при сохранении данных: {e}")
+        raise HTTPException(status_code=500, detail="Ошибка сохранения данных")
+
+
+def check_and_update_limits() -> dict:
+    """
+    Проверяет, не начался ли новый месяц, и обновляет лимиты.
+    Важная особенность: остатки НАКАПЛИВАЮТСЯ из месяца в месяц, а не сгорают!
+    """
+    # Загружаем текущие данные
+    data = load_data()
+
+    # Получаем текущую дату
+    current_date = datetime.now().date()
+
+    # Получаем дату последнего обновления из данных (по умолчанию 2025-01-01)
+    last_reset_str = data.get("last_reset_date", "2025-01-01")
+    last_reset_date = datetime.fromisoformat(last_reset_str).date()
+
+    # Сравниваем месяц и год для определения начала нового месяца
+    if current_date.month != last_reset_date.month or current_date.year != last_reset_date.year:
+        print(f"[INFO] Обновление лимитов. Прошлый месяц: {last_reset_date}, Текущий месяц: {current_date}")
+
+        # Проходим по всем детям в данных
+        for child in data["children"]:
+            # Обнуляем счётчик выпитого в текущем месяце
+            child["consumed_this_month"] = 0
+
+            # УВЕЛИЧИВАЕМ остаток на monthly_limit (НАКОПЛЕНИЕ!)
+            # Это ключевое отличие от системы с ежемесячным сгоранием остатков
+            child["remaining"] += child["monthly_limit"]
+
+        # Обновляем дату последнего сброса
+        data["last_reset_date"] = current_date.isoformat()
+
+        # Сохраняем изменения в файл
+        save_data(data)
+        print(f"[INFO] Лимиты обновлены для {len(data['children'])} детей")
+
+    return data
+
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Проверяет корректность токена авторизации.
+    Работает со стандартом Bearer token, используемым в Swagger UI.
+    """
+    # Загружаем данные для получения сохранённого токена
+    data = load_data()
+    correct_token = data.get("auth_token", "")
+
+    # Сравниваем переданный токен с сохранённым
+    if credentials.credentials != correct_token:
+        # Если токен неверный, возвращаем ошибку 401 Unauthorized
+        raise HTTPException(
+            status_code=401,
+            detail="Неверный токен авторизации"
+        )
+
+    return True  # Токен верный
+
+# ===== ENDPOINT 1: Главная страница =====
+@app.get("/")
+def read_root():
+    """Корневой эндпоинт для проверки работоспособности сервера."""
+    return {"message": "Cola Tracker API работает!", "version": "2.0"}
+
+
+# ===== ENDPOINT 2: Получить список детей =====
+@app.get("/children", response_model=List[ChildResponse])
+def get_children(authorized: bool = Security(verify_token)):
+    """
+    Возвращает список всех детей с их данными.
+    Требует токен авторизации в заголовке Authorization: Bearer <token>.
+    Автоматически проверяет и обновляет месячные лимиты при необходимости.
+    """
+    # Автоматически проверяет месяц и обновляет лимиты при необходимости
+    data = check_and_update_limits()
+
+    # Возвращаем только массив детей (опускаем историю и токен)
+    return data["children"]
+
+
+# ===== ENDPOINT 3: Добавить запись о выпитом =====
+@app.post("/children/{child_id}/drink")
+def add_drink(
+        child_id: int,  # ID ребёнка из URL пути
+        drink: DrinkRequest,  # Данные о выпитом из тела запроса
+        authorized: bool = Security(verify_token)  # Проверка авторизации
+):
+    """
+    Добавляет запись о выпитом для указанного ребёнка.
+    Обновляет счётчики consumed_this_month и remaining.
+    """
+    # Проверяем и обновляем лимиты перед выполнением операции
+    data = check_and_update_limits()
+
+    # Ищем ребёнка по ID в списке детей
+    child_found = None
+    for child in data["children"]:
+        if child["id"] == child_id:
+            child_found = child
+            break
+
+    # Если ребёнок не найден, возвращаем 404
+    if not child_found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Ребёнок с ID {child_id} не найден"
+        )
+
+    # Создаём новую запись для истории с уникальным ID
+    new_drink_id = len(data["drinks_history"]) + 1
+    new_drink = {
+        "id": new_drink_id,
+        "child_id": child_id,
+        "amount_ml": drink.amount_ml,
+        "timestamp": datetime.now().isoformat()  # Текущее время в формате ISO
+    }
+
+    # Добавляем запись в историю
+    data["drinks_history"].append(new_drink)
+
+    # Обновляем счётчики ребёнка
+    child_found["consumed_this_month"] += drink.amount_ml  # Увеличиваем выпитое в этом месяце
+    child_found["remaining"] -= drink.amount_ml  # Уменьшаем остаток
+
+    # Проверяем, что остаток не ушёл в минус (можно добавить бизнес-правило)
+    if child_found["remaining"] < 0:
+        # В этом случае остаток отрицательный - можно добавить предупреждение
+        print(f"[WARNING] У ребёнка {child_id} отрицательный остаток: {child_found['remaining']} мл")
+
+    # Сохраняем обновлённые данные
+    save_data(data)
+
+    # Возвращаем успешный ответ с данными
+    return {
+        "message": "Запись добавлена",
+        "child": child_found,
+        "drink": new_drink
+    }
+
+
+# ===== ENDPOINT 4: Получить историю ребёнка =====
+@app.get("/children/{child_id}/history", response_model=List[DrinkHistoryItem])
+def get_history(
+        child_id: int,  # ID ребёнка из URL пути
+        authorized: bool = Security(verify_token)  # Проверка авторизации
+):
+    """
+    Возвращает историю записей о выпитом для указанного ребёнка.
+    Записи отсортированы от новых к старым.
+    """
+    # Загружаем данные (без обновления лимитов, т.к. это только чтение)
+    data = load_data()
+
+    # Фильтруем записи по child_id
+    child_history = [
+        drink for drink in data["drinks_history"]
+        if drink["child_id"] == child_id
+    ]
+
+    # Сортируем записи от новых к старым (по убыванию timestamp)
+    child_history.sort(key=lambda x: x["timestamp"], reverse=True)
+
+    return child_history
+
+
+# ===== ENDPOINT 5: Удалить запись =====
+@app.delete("/drinks/{drink_id}")
+def delete_drink(
+        drink_id: int,  # ID записи для удаления
+        authorized: bool = Security(verify_token)  # Проверка авторизации
+):
+    """
+    Удаляет запись о выпитом по её ID.
+    Откатывает счётчики ребёнка на соответствующее количество.
+    """
+    # Загружаем данные
+    data = load_data()
+
+    # Ищем запись для удаления по ID
+    drink_to_delete = None
+    for drink in data["drinks_history"]:
+        if drink["id"] == drink_id:
+            drink_to_delete = drink
+            break
+
+    # Если запись не найдена, возвращаем 404
+    if not drink_to_delete:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Запись с ID {drink_id} не найдена"
+        )
+
+    # Сохраняем информацию об удаляемой записи для ответа
+    deleted_drink_info = drink_to_delete.copy()
+
+    # Находим ребёнка, к которому относится запись
+    child_found = None
+    for child in data["children"]:
+        if child["id"] == drink_to_delete["child_id"]:
+            child_found = child
+            break
+
+    # Откатываем счётчики ребёнка (возвращаем выпитое количество)
+    if child_found:
+        child_found["consumed_this_month"] -= drink_to_delete["amount_ml"]
+        child_found["remaining"] += drink_to_delete["amount_ml"]
+
+        # Проверяем, чтобы consumed_this_month не ушёл в минус
+        if child_found["consumed_this_month"] < 0:
+            child_found["consumed_this_month"] = 0
+
+    # Удаляем запись из истории
+    data["drinks_history"].remove(drink_to_delete)
+
+    # Сохраняем обновлённые данные
+    save_data(data)
+
+    return {
+        "message": "Запись удалена",
+        "deleted_drink": deleted_drink_info
+    }
+
+
+# ===== ENDPOINT 6: Загрузить фотографию ребёнка =====
+@app.post("/children/{child_id}/photo")
+async def upload_photo(
+        child_id: int,  # ID ребёнка для которого загружается фото
+        file: UploadFile = File(...),  # Файл из тела запроса
+        authorized: bool = Security(verify_token)  # Проверка авторизации
+):
+    """
+    Загружает фотографию для указанного ребёнка.
+    Принимает файлы: .jpg, .jpeg, .png, .webp
+    Использует асинхронную обработку файлов.
+    """
+    # Загружаем данные
+    data = load_data()
+
+    # Ищем ребёнка по ID
+    child_found = None
+    for child in data["children"]:
+        if child["id"] == child_id:
+            child_found = child
+            break
+
+    # Если ребёнок не найден
+    if not child_found:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Ребёнок с ID {child_id} не найден"
+        )
+
+    # Проверяем расширение файла на безопасность
+    file_extension = os.path.splitext(file.filename)[1].lower()
+    if file_extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Неподдерживаемый формат файла. Разрешены: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+    # Генерируем имя файла на основе ID ребёнка
+    filename = f"child_{child_id}{file_extension}"
+    file_path = os.path.join(PHOTOS_DIR, filename)
+
+    # Сохраняем файл на диск
+    try:
+        # Читаем содержимое файла асинхронно (для больших файлов)
+        contents = await file.read()
+
+        # Сохраняем на диск
+        with open(file_path, "wb") as f:
+            f.write(contents)
+    except Exception as e:
+        # Обработка ошибок записи файла
+        print(f"[ERROR] Ошибка при сохранении файла: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Ошибка при сохранении фотографии"
+        )
+
+    # Обновляем поле photo_url у ребёнка
+    # Используем относительный путь для доступа через эндпоинт /photos/
+    child_found["photo_url"] = f"{PHOTOS_DIR}/{filename}"
+
+    # Сохраняем обновлённые данные
+    save_data(data)
+
+    return {
+        "message": "Фотография загружена",
+        "photo_url": child_found["photo_url"],
+        "child_id": child_id
+    }
+
+
+# ===== ENDPOINT 7: Получить фотографию =====
+@app.get("/photos/{filename}")
+def get_photo(filename: str):
+    """
+    Возвращает фотографию по её имени.
+    Не требует токена авторизации для публичного доступа.
+    """
+    # Формируем полный путь к файлу
+    file_path = os.path.join(PHOTOS_DIR, filename)
+
+    # Проверяем, существует ли файл
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Файл '{filename}' не найден"
+        )
+
+    # Проверяем безопасность пути (предотвращаем path traversal атаки)
+    # Получаем абсолютные пути для сравнения
+    photos_abs_path = os.path.abspath(PHOTOS_DIR)
+    file_abs_path = os.path.abspath(file_path)
+
+    # Убеждаемся, что файл действительно находится внутри папки photos
+    if not file_abs_path.startswith(photos_abs_path):
+        raise HTTPException(
+            status_code=403,
+            detail="Доступ запрещён"
+        )
+
+    # Возвращаем файл как статический ресурс
+    return FileResponse(file_path)
+
+
+
+# ===== ЗАПУСК СЕРВЕРА =====
+if __name__ == "__main__":
+    import uvicorn
+    # Запускаем сервер Uvicorn
+    # host="0.0.0.0" - слушаем все сетевые интерфейсы
+    # port=8000 - стандартный порт для FastAPI
+    # reload=True - автоматическая перезагрузка при изменениях кода (для разработки)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
