@@ -83,3 +83,7 @@ lint-results_files/
 
 # macOS
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc

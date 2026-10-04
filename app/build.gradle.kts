@@ -1,7 +1,17 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// Читаем секреты из local.properties (не коммитится в git)
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
 }
 
 android {
@@ -12,12 +22,18 @@ android {
         applicationId = "com.colatracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 3
+        versionName = "2.2"
 
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Секреты из local.properties → BuildConfig
+        buildConfigField("String", "API_AUTH_TOKEN",
+            "\"${localProperties.getProperty("API_AUTH_TOKEN", "")}\"")
+        buildConfigField("String", "API_BASE_URL",
+            "\"${localProperties.getProperty("API_BASE_URL", "http://<SERVER_IP>:8000")}\"")
     }
 
     buildTypes {
@@ -28,8 +44,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Для тестирования без подписи - используем debug ключ
-            signingConfig = signingConfigs.getByName("debug")
+            // TODO: настроить release signing keystore перед публикацией
         }
     }
     
@@ -44,6 +59,7 @@ android {
     
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     
     composeOptions {
@@ -66,8 +82,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
-    implementation("androidx.navigation:navigation-compose:2.7.6")
-    
+    // navigation-compose не используется: навигация сделана вручную в MainActivity
+
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
@@ -78,8 +94,8 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:2.3.7")
     implementation("io.ktor:ktor-serialization-kotlinx-json:2.3.7")
     implementation("io.ktor:ktor-client-logging:2.3.7")
-    implementation("io.ktor:ktor-client-auth:2.3.7")
-    
+    // ktor-client-auth не используется: токен ставится вручную в defaultRequest
+
     // Kotlinx Serialization
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
     
@@ -95,4 +111,7 @@ dependencies {
     // Debug
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    // Unit-тесты
+    testImplementation("junit:junit:4.13.2")
 }

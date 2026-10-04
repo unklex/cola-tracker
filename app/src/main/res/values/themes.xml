@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base application theme using Material3 -->
-    <style name="Theme.Material3.DayNight.NoActionBar" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your theme here. -->
-    </style>
+    <!-- Базовая тема окна. Весь UI рисует Compose (ColaTrackerTheme),
+         здесь только фон окна и системные панели до старта Compose. -->
+    <style name="Theme.ColaTracker" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Тёмный фон окна, чтобы при запуске в тёмной теме не мигал белый экран -->
+    <style name="Theme.ColaTracker" parent="android:Theme.Material.NoActionBar" />
+</resources>

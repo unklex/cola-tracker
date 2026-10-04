@@ -12,17 +12,30 @@ object AppConfig {
     const val USE_MOCK_DATA = false
 
     /**
-     * URL сервера
+     * URL сервера (из local.properties → BuildConfig).
+     * Хвостовой слэш убираем: URL фотографий склеивается как "$BASE_URL/$photoUrl",
+     * и двойной слэш ломает путь.
      */
-    const val BASE_URL = "http://<SERVER_IP>:8000"
+    val BASE_URL: String = BuildConfig.API_BASE_URL.trimEnd('/')
 
     /**
-     * Токен аутентификации
+     * Токен аутентификации (из local.properties → BuildConfig)
      */
-    const val AUTH_TOKEN = "REDACTED_OLD_TOKEN"
+    val AUTH_TOKEN: String = BuildConfig.API_AUTH_TOKEN
 
     /**
-     * Таймаут запросов в миллисекундах
+     * Полный таймаут запроса (включая загрузку фото).
      */
     const val REQUEST_TIMEOUT_MS = 30_000L
+
+    /**
+     * Таймаут установки соединения. Держим коротким: 30 секунд ожидания
+     * подключения — это вечность для мобильного интерфейса.
+     */
+    const val CONNECT_TIMEOUT_MS = 10_000L
+
+    /**
+     * Таймаут молчания сокета между пакетами.
+     */
+    const val SOCKET_TIMEOUT_MS = 20_000L
 }

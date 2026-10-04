@@ -2,31 +2,29 @@ package com.colatracker.ui.screens
 
 import android.Manifest
 import android.net.Uri
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
-import android.util.Log
-import java.io.ByteArrayOutputStream
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -36,23 +34,30 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.colatracker.data.models.Child
 import com.colatracker.data.models.DrinkHistoryItem
-import com.colatracker.ui.components.ChildAvatar
+import com.colatracker.ui.components.AnimatedCounter
+import com.colatracker.ui.components.CircularProgressAvatar
+import com.colatracker.ui.components.ColaDetailTopAppBar
+import com.colatracker.ui.components.ColaIcons
+import com.colatracker.ui.components.GradientProgressBar
+import com.colatracker.ui.components.HistoryItemSkeleton
+import com.colatracker.ui.components.StatisticsCard
+import com.colatracker.ui.components.balanceColor
+import com.colatracker.ui.components.formatBalanceInMonths
+import com.colatracker.ui.components.formatVolume
+import com.colatracker.ui.components.monthUsageColor
+import com.colatracker.ui.theme.ColaRed
 import com.colatracker.viewmodels.ChildDetailUiState
 import com.colatracker.viewmodels.ChildDetailViewModel
 import java.io.File
-import android.widget.Toast
-import kotlinx.coroutines.delay
 
 /**
- * Экран деталей ребёнка с добавлением записей и историей
+ * Экран деталей ребёнка
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChildDetailScreen(
     child: Child,
     onNavigateBack: (hasChanges: Boolean) -> Unit
 ) {
-    // Создаём ViewModel с фабрикой
     val viewModel: ChildDetailViewModel = viewModel(
         key = "child_${child.id}",
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
@@ -63,28 +68,27 @@ fun ChildDetailScreen(
         }
     )
 
-    // Обновляем данные при входе на экран
-    LaunchedEffect(Unit) {
-        viewModel.refresh()
+    // ViewModel переиспользуется при повторном открытии того же ребёнка,
+    // поэтому данные обновляем на каждый вход (и только здесь, не в init).
+    LaunchedEffect(child.id) {
+        viewModel.load()
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isLoadingHistory by viewModel.isLoadingHistory.collectAsStateWithLifecycle()
     val isAddingDrink by viewModel.isAddingDrink.collectAsStateWithLifecycle()
     val isUploadingPhoto by viewModel.isUploadingPhoto.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val hasChanges by viewModel.hasChanges.collectAsStateWithLifecycle()
+    val photoVersion by viewModel.photoVersion.collectAsStateWithLifecycle()
 
-    // Контекст для работы с файлами
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Состояние для показа bottom sheet выбора фото
     var showPhotoBottomSheet by remember { mutableStateOf(false) }
-
-    // URI для временного файла камеры
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
 
-    // Launcher для камеры (определяем первым, чтобы использовать в permission callback)
-    // Launcher для камеры (определяем первым, чтобы использовать в permission callback)
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success: Boolean ->
@@ -95,7 +99,6 @@ fun ChildDetailScreen(
         }
     }
 
-    // Запрос разрешения камеры перед запуском
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -112,71 +115,65 @@ fun ChildDetailScreen(
         }
     }
 
-    // Launcher для выбора из галереи
     val galleryLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { u ->
-            viewModel.processAndUploadPhoto(u, context)
-        }
+        uri?.let { viewModel.processAndUploadPhoto(it, context) }
     }
 
-    // Toast вместо Snackbar — устраняет layout crash при Scaffold + SnackbarHost
-    // Используем LaunchedEffect с задержкой чтобы избежать state change во время measure/draw
+    // Сообщения показываем снекбаром: тост исчезал слишком быстро
+    // и терялся на фоне остальной анимации.
     LaunchedEffect(message) {
         message?.let { msg ->
-            // Показываем Toast
-            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-            // Ждём завершения текущего frame и ещё немного перед изменением state
-            // Это предотвращает remeasure во время draw phase
-            delay(200)
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            snackbarHostState.showSnackbar(msg)
             viewModel.clearMessage()
         }
     }
-    
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Подробности") },
-                navigationIcon = {
-                    IconButton(onClick = { onNavigateBack(hasChanges) }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Назад"
-                        )
-                    }
-                }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            ColaDetailTopAppBar(
+                title = child.name,
+                onNavigateBack = { onNavigateBack(hasChanges) }
             )
-        }
-    ) { paddingValues ->
-        when (val state = uiState) {
-            is ChildDetailUiState.Loading -> {
-                LoadingContent(Modifier.padding(paddingValues))
-            }
-            
-            is ChildDetailUiState.Success -> {
-                ChildDetailContent(
-                    child = state.child,
-                    history = state.history,
-                    isAddingDrink = isAddingDrink,
-                    isUploadingPhoto = isUploadingPhoto,
-                    onAddDrink = { amount -> viewModel.addDrink(amount) },
-                    onDeleteDrink = { drinkId -> viewModel.deleteDrink(drinkId) },
-                    onAvatarClick = { showPhotoBottomSheet = true },
-                    modifier = Modifier.padding(paddingValues)
-                )
-            }
-            
-            is ChildDetailUiState.Error -> {
-                ErrorContent(
-                    message = state.message,
-                    modifier = Modifier.padding(paddingValues)
-                )
+
+            when (val state = uiState) {
+                is ChildDetailUiState.Success -> {
+                    ChildDetailContent(
+                        child = state.child,
+                        history = state.history,
+                        isLoadingHistory = isLoadingHistory,
+                        isAddingDrink = isAddingDrink,
+                        isUploadingPhoto = isUploadingPhoto,
+                        photoVersion = photoVersion,
+                        onAddDrink = { amount -> viewModel.addDrink(amount) },
+                        onDeleteDrink = { drinkId -> viewModel.deleteDrink(drinkId) },
+                        onAvatarClick = { showPhotoBottomSheet = true }
+                    )
+                }
+
+                is ChildDetailUiState.Error -> {
+                    ErrorContent(
+                        message = state.message,
+                        onRetry = { viewModel.retry() }
+                    )
+                }
             }
         }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        )
     }
 
-    // Bottom sheet для выбора источника фото
     if (showPhotoBottomSheet) {
         PhotoSourceBottomSheet(
             onDismiss = { showPhotoBottomSheet = false },
@@ -192,235 +189,284 @@ fun ChildDetailScreen(
     }
 }
 
-/**
- * Основной контент экрана.
- * Column + verticalScroll вместо LazyColumn — устраняет "pending composition has not been applied"
- * при subcompose во время measure. История обычно небольшая, lazy не нужен.
- */
 @Composable
 private fun ChildDetailContent(
     child: Child,
     history: List<DrinkHistoryItem>,
+    isLoadingHistory: Boolean,
     isAddingDrink: Boolean,
     isUploadingPhoto: Boolean,
+    photoVersion: Long,
     onAddDrink: (Int) -> Unit,
     onDeleteDrink: (Int) -> Unit,
-    onAvatarClick: () -> Unit,
-    modifier: Modifier = Modifier
+    onAvatarClick: () -> Unit
 ) {
     val scrollState = rememberScrollState()
+
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         ChildInfoHeader(
             child = child,
             isUploadingPhoto = isUploadingPhoto,
+            photoVersion = photoVersion,
             onAvatarClick = onAvatarClick
         )
-        QuickAmountSelector(
-            isLoading = isAddingDrink,
-            onAmountSelected = onAddDrink
-        )
-        Text(
-            text = "История",
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 8.dp)
-        )
-        if (history.isEmpty()) {
-            EmptyHistoryPlaceholder()
-        } else {
-            history.forEach { drink ->
-                DrinkHistoryItemCard(
-                    item = drink,
-                    onDelete = { onDeleteDrink(drink.id) },
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
+
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            MonthUsageSection(child = child)
+
+            QuickAmountSelector(
+                isLoading = isAddingDrink,
+                onAmountSelected = onAddDrink
+            )
+
+            if (history.isNotEmpty()) {
+                StatisticsCard(history = history)
             }
+
+            HistorySection(
+                history = history,
+                isLoading = isLoadingHistory,
+                onDeleteDrink = onDeleteDrink
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
 
 /**
- * Шапка с информацией о ребёнке
+ * Шапка: аватар с расходом месяца + накопленный баланс («кола-метр»).
  */
 @Composable
 private fun ChildInfoHeader(
     child: Child,
     isUploadingPhoto: Boolean,
+    photoVersion: Long,
     onAvatarClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer
-        )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        Color.Transparent
+                    )
+                )
+            )
+            .padding(24.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(20.dp),
+            modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Аватар с возможностью нажатия (явный размер для стабильного layout с overlay)
-            Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(CircleShape)
-                    .clickable(enabled = !isUploadingPhoto) { onAvatarClick() },
-                contentAlignment = Alignment.Center
-            ) {
-                ChildAvatar(
-                    photoUrl = child.photoUrl,
-                    name = child.name,
-                    size = 80
-                )
+            CircularProgressAvatar(
+                photoUrl = child.photoUrl,
+                name = child.name,
+                progress = child.monthUsageProgress,
+                size = 120.dp,
+                strokeWidth = 8.dp,
+                isUploading = isUploadingPhoto,
+                photoVersion = photoVersion,
+                onAvatarClick = onAvatarClick
+            )
 
-                // Иконка добавления фото
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isUploadingPhoto) {
-                        Text(
-                            text = "…",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Edit,
-                            contentDescription = "Изменить фото",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
-                }
-            }
-            
-            // Имя
             Text(
                 text = child.name,
                 style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
             )
-            
-            // Остаток
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Доступно",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                )
-                Text(
-                    text = "${child.remaining} мл",
-                    style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+
+            // Это накопленный баланс, а не «сколько осталось до месячной цели»:
+            // он переносится между месяцами и может уйти в минус.
+            AnimatedCounter(
+                targetValue = child.remaining,
+                label = "Кола-метр (накоплено)",
+                color = balanceColor(child),
+                caption = if (child.isOverdrawn) {
+                    "перерасход — баланс в минусе"
+                } else {
+                    formatBalanceInMonths(child)
+                }
+            )
         }
     }
 }
 
 /**
- * Быстрый выбор количества
+ * Расход за текущий месяц.
  */
 @Composable
-private fun QuickAmountSelector(
-    isLoading: Boolean,
-    onAmountSelected: (Int) -> Unit
-) {
-    var showCustomDialog by remember { mutableStateOf(false) }
-    
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun MonthUsageSection(child: Child) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "Сколько выпито?",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Расход за месяц",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "${formatVolume(child.consumedThisMonth)} / " +
+                            formatVolume(child.monthlyLimit),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            GradientProgressBar(
+                progress = child.monthUsageProgress,
+                height = 20.dp,
+                showPercentage = true,
+                showTicks = true
             )
-            
+
+            Text(
+                text = if (child.isOverLimit) {
+                    "Начисление превышено на ${formatVolume(child.overLimitMl)} " +
+                            "(${child.monthUsagePercent}%) — расходуется накопленное"
+                } else {
+                    "1-го числа кола-метр пополнится на ${formatVolume(child.monthlyLimit)}"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (child.isOverLimit) {
+                    monthUsageColor(child)
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickAmountSelector(
+    isLoading: Boolean,
+    onAmountSelected: (Int) -> Unit
+) {
+    var showCustomDialog by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Добавить напиток",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                ColaIcons.GlassIcon(
+                    size = 24.dp,
+                    liquidColor = MaterialTheme.colorScheme.primary
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Кнопка 250 мл
-                OutlinedButton(
-                    onClick = { onAmountSelected(250) },
+                DrinkButton(
+                    amount = 250,
+                    label = "Стакан",
+                    icon = {
+                        ColaIcons.GlassIcon(
+                            size = 20.dp,
+                            liquidColor = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    isPrimary = false,
                     enabled = !isLoading,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAmountSelected(250)
+                    },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("250 мл", fontWeight = FontWeight.Bold)
-                        Text("Стакан", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                
-                // Кнопка 330 мл
-                Button(
-                    onClick = { onAmountSelected(330) },
+                )
+
+                DrinkButton(
+                    amount = 330,
+                    label = "Банка",
+                    icon = {
+                        ColaIcons.CanIcon(
+                            size = 20.dp,
+                            primaryColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    },
+                    isPrimary = true,
                     enabled = !isLoading,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onAmountSelected(330)
+                    },
                     modifier = Modifier.weight(1f)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("330 мл", fontWeight = FontWeight.Bold)
-                        Text("Банка", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                
-                // Кнопка свое количество
-                OutlinedButton(
+                )
+
+                DrinkButton(
+                    amount = null,
+                    label = "Другое",
+                    icon = {
+                        ColaIcons.DropIcon(
+                            size = 20.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    },
+                    isPrimary = false,
+                    enabled = !isLoading,
                     onClick = { showCustomDialog = true },
-                    enabled = !isLoading,
                     modifier = Modifier.weight(1f)
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("Свое", fontWeight = FontWeight.Bold)
-                        Text("Другое", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
+                )
             }
-            
-            // Индикатор загрузки — только текст. Linear/CircularProgressIndicator вызывают
-            // NoSuchMethodError (KeyframesSpec) с Compose BOM 2024.01.00.
+
             if (isLoading) {
-                Text(
-                    text = "Загрузка…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 8.dp),
-                    textAlign = TextAlign.Center
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
         }
     }
-    
-    // Диалог для ввода кастомного количества
+
     if (showCustomDialog) {
         CustomAmountDialog(
             onDismiss = { showCustomDialog = false },
@@ -432,74 +478,110 @@ private fun QuickAmountSelector(
     }
 }
 
-/**
- * Диалог для ввода своего количества
- */
 @Composable
-private fun CustomAmountDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (Int) -> Unit
+private fun DrinkButton(
+    amount: Int?,
+    label: String,
+    icon: @Composable () -> Unit,
+    isPrimary: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    var amount by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf<String?>(null) }
-    
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Свое количество") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = amount,
-                    onValueChange = {
-                        amount = it
-                        error = null
-                    },
-                    label = { Text("Количество (мл)") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    isError = error != null,
-                    supportingText = error?.let { err -> { Text(err) } }
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val value = amount.toIntOrNull()
-                    when {
-                        value == null -> error = "Введите число"
-                        value <= 0 -> error = "Количество должно быть больше 0"
-                        value > 5000 -> error = "Слишком большое количество"
-                        else -> onConfirm(value)
-                    }
-                }
-            ) {
-                Text("Добавить")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+    val content: @Composable ColumnScope.() -> Unit = {
+        icon()
+        Text(
+            text = amount?.let { "$it мл" } ?: "?",
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.labelLarge
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+
+    if (isPrimary) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.height(72.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            )
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                content = content
+            )
         }
-    )
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = modifier.height(72.dp),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                content = content
+            )
+        }
+    }
 }
 
-/**
- * Карточка записи в истории с поддержкой свайпа для удаления
- */
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HistorySection(
+    history: List<DrinkHistoryItem>,
+    isLoading: Boolean,
+    onDeleteDrink: (Int) -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = "История",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
+
+        when {
+            isLoading && history.isEmpty() -> {
+                repeat(3) { HistoryItemSkeleton() }
+            }
+
+            history.isEmpty() -> {
+                EmptyHistoryPlaceholder()
+            }
+
+            else -> {
+                history.forEach { drink ->
+                    DrinkHistoryItemCard(
+                        item = drink,
+                        onDelete = { onDeleteDrink(drink.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DrinkHistoryItemCard(
     item: DrinkHistoryItem,
-    onDelete: () -> Unit,
-    modifier: Modifier = Modifier
+    onDelete: () -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
 
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
         )
     ) {
         Row(
@@ -509,44 +591,64 @@ private fun DrinkHistoryItemCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier.weight(1f)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "${item.amountMl} мл",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = item.getFormattedDateTime(),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ColaIcons.CanIcon(
+                        size = 24.dp,
+                        primaryColor = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Column {
+                    Text(
+                        text = "${item.amountMl} мл",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = item.getFormattedDateTime(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
-            IconButton(onClick = { showDeleteDialog = true }) {
+            IconButton(
+                onClick = { showDeleteDialog = true },
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f))
+            ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Удалить",
-                    tint = MaterialTheme.colorScheme.error
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
     }
 
-    // Диалог подтверждения удаления
     if (showDeleteDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             title = { Text("Удалить запись?") },
             text = { Text("Вы уверены, что хотите удалить запись о ${item.amountMl} мл?") },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDeleteDialog = false
-                        onDelete()
-                    }
-                ) {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    onDelete()
+                }) {
                     Text("Удалить", color = MaterialTheme.colorScheme.error)
                 }
             },
@@ -559,9 +661,6 @@ private fun DrinkHistoryItemCard(
     }
 }
 
-/**
- * Placeholder когда история пуста
- */
 @Composable
 private fun EmptyHistoryPlaceholder() {
     Box(
@@ -572,12 +671,28 @@ private fun EmptyHistoryPlaceholder() {
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                text = "📋",
-                style = MaterialTheme.typography.displayMedium
-            )
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                Color.Transparent
+                            )
+                        ),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                ColaIcons.GlassIcon(
+                    size = 32.dp,
+                    liquidColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                )
+            }
+
             Text(
                 text = "История пуста",
                 style = MaterialTheme.typography.titleMedium,
@@ -594,42 +709,101 @@ private fun EmptyHistoryPlaceholder() {
 }
 
 @Composable
-private fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = "Загрузка…",
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-    }
+private fun CustomAmountDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var amount by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Своё количество") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { newValue ->
+                        // Пускаем только цифры, чтобы не ловить ошибку после ввода
+                        if (newValue.length <= 4 && newValue.all { it.isDigit() }) {
+                            amount = newValue
+                            error = null
+                        }
+                    },
+                    label = { Text("Количество (мл)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    isError = error != null,
+                    supportingText = error?.let { err -> { Text(err) } },
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val value = amount.toIntOrNull()
+                    when {
+                        value == null -> error = "Введите число"
+                        value <= 0 -> error = "Количество должно быть больше 0"
+                        value > 5000 -> error = "Слишком большое количество"
+                        else -> onConfirm(value)
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Добавить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Отмена")
+            }
+        }
+    )
 }
 
 @Composable
 private fun ErrorContent(
     message: String,
-    modifier: Modifier = Modifier
+    onRetry: () -> Unit
 ) {
     Box(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(32.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.error,
-            textAlign = TextAlign.Center
-        )
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(
+                text = "😕",
+                style = MaterialTheme.typography.displayMedium
+            )
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+            Button(
+                onClick = onRetry,
+                shape = RoundedCornerShape(50),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Text("Повторить")
+            }
+        }
     }
 }
 
-/**
- * Bottom sheet для выбора источника фото
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun PhotoSourceBottomSheet(
@@ -637,15 +811,13 @@ private fun PhotoSourceBottomSheet(
     onCameraSelected: () -> Unit,
     onGallerySelected: () -> Unit
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss
-    ) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp)
                 .padding(bottom = 32.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 text = "Выберите источник фото",
@@ -654,82 +826,76 @@ private fun PhotoSourceBottomSheet(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
 
-            // Камера
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onCameraSelected() },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Edit,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Text(
-                        text = "Камера",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
+            PhotoSourceRow(
+                title = "Камера",
+                subtitle = "Сделать новое фото",
+                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                iconBackground = ColaRed.copy(alpha = 0.2f),
+                icon = { ColaIcons.DropIcon(size = 24.dp, color = ColaRed) },
+                onClick = onCameraSelected
+            )
 
-            // Галерея
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onGallerySelected() },
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary
+            PhotoSourceRow(
+                title = "Галерея",
+                subtitle = "Выбрать из галереи",
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                iconBackground = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f),
+                icon = {
+                    ColaIcons.BottleIcon(
+                        size = 24.dp,
+                        liquidColor = MaterialTheme.colorScheme.secondary
                     )
-                    Text(
-                        text = "Галерея",
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
+                },
+                onClick = onGallerySelected
+            )
         }
     }
 }
 
-/** Конвертирует байты изображения (PNG/WebP и т.д.) в JPEG для загрузки. */
-private fun encodeAsJpeg(input: ByteArray): ByteArray? {
-    return try {
-        val opts = BitmapFactory.Options().apply {
-            inJustDecodeBounds = true
+@Composable
+private fun PhotoSourceRow(
+    title: String,
+    subtitle: String,
+    containerColor: Color,
+    iconBackground: Color,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        shape = RoundedCornerShape(16.dp),
+        color = containerColor
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(iconBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                icon()
+            }
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
-        BitmapFactory.decodeByteArray(input, 0, input.size, opts)
-        opts.inJustDecodeBounds = false
-        opts.inSampleSize = when {
-            opts.outWidth <= 1024 && opts.outHeight <= 1024 -> 1
-            opts.outWidth <= 2048 && opts.outHeight <= 2048 -> 2
-            else -> 4
-        }
-        val bm = BitmapFactory.decodeByteArray(input, 0, input.size, opts) ?: return null
-        val out = ByteArrayOutputStream()
-        bm.compress(Bitmap.CompressFormat.JPEG, 85, out)
-        bm.recycle()
-        out.toByteArray()
-    } catch (_: Exception) {
-        null
     }
 }

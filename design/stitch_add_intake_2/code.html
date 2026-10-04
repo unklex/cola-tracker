@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Family Management - Effervescent Archive</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "surface-container-low": "#f5eff0",
+              "secondary-fixed-dim": "#ffaeb8",
+              "surface-tint": "#ba0012",
+              "secondary": "#9f364b",
+              "on-secondary-fixed-variant": "#912b41",
+              "on-tertiary-fixed": "#280047",
+              "error-container": "#f74b6d",
+              "surface-variant": "#e0dcdc",
+              "on-tertiary-fixed-variant": "#531a80",
+              "inverse-primary": "#ff544a",
+              "on-tertiary": "#fceeff",
+              "primary-fixed": "#ff766a",
+              "on-secondary-fixed": "#6a0b26",
+              "secondary-fixed": "#ffc2c9",
+              "background": "#faf5f5",
+              "secondary-dim": "#902a40",
+              "on-secondary": "#ffefef",
+              "on-surface": "#302e2f",
+              "surface-dim": "#d8d3d4",
+              "secondary-container": "#ffc2c9",
+              "tertiary-container": "#d199ff",
+              "surface-container": "#ece7e7",
+              "outline": "#797676",
+              "primary-fixed-dim": "#ff5b50",
+              "on-primary-container": "#4f0003",
+              "on-primary": "#ffefed",
+              "primary": "#ba0012",
+              "surface-bright": "#faf5f5",
+              "on-tertiary-container": "#490c77",
+              "on-secondary-container": "#852138",
+              "error": "#b41340",
+              "error-dim": "#a70138",
+              "inverse-surface": "#0f0e0e",
+              "inverse-on-surface": "#9f9c9c",
+              "tertiary-dim": "#6b3598",
+              "tertiary-fixed": "#d199ff",
+              "surface-container-high": "#e6e1e1",
+              "on-error": "#ffefef",
+              "primary-dim": "#a4000f",
+              "on-error-container": "#510017",
+              "on-surface-variant": "#5d5b5b",
+              "surface-container-highest": "#e0dcdc",
+              "tertiary-fixed-dim": "#c48bf4",
+              "surface-container-lowest": "#ffffff",
+              "outline-variant": "#b0acac",
+              "on-background": "#302e2f",
+              "on-primary-fixed-variant": "#600005",
+              "on-primary-fixed": "#000000",
+              "tertiary": "#7842a5",
+              "surface": "#faf5f5",
+              "primary-container": "#ff766a"
+            },
+            fontFamily: {
+              "headline": ["Plus Jakarta Sans"],
+              "body": ["Plus Jakarta Sans"],
+              "label": ["Plus Jakarta Sans"]
+            },
+            borderRadius: {"DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<nav class="fixed top-0 w-full flex justify-between items-center px-6 h-16 bg-stone-50/80 dark:bg-stone-900/80 backdrop-blur-xl docked full-width z-50 tonal-shift-bg no-border">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-red-700 dark:text-red-500">bubble_chart</span>
+<span class="text-xl font-black text-red-700 dark:text-red-600 font-['Plus_Jakarta_Sans'] tracking-tight">Effervescent Archive</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="hidden md:flex gap-6 items-center">
+<a class="text-stone-500 dark:text-stone-400 font-semibold text-sm hover:opacity-80 transition-opacity" href="#">Home</a>
+<a class="text-stone-500 dark:text-stone-400 font-semibold text-sm hover:opacity-80 transition-opacity" href="#">Insights</a>
+<a class="text-red-700 dark:text-red-500 font-semibold text-sm hover:opacity-80 transition-opacity" href="#">Settings</a>
+</div>
+<div class="w-10 h-10 rounded-full bg-surface-container-highest flex items-center justify-center overflow-hidden border-2 border-primary-container">
+<img alt="Family Avatar" class="w-full h-full object-cover" data-alt="Cartoon avatar for family group profile" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBIIBn3MSJuN6guCdvYKdm6NFoFf083stU0IwnRG1k-pmkSSBLH3fks1Zzl1HXRw4ztAb6Jr5xpZqI9vTYe7t5Vq82cdH-IpGiUD16lcwws9q4I5FsQJgxwgYuWyOttNdJtNNDOHUrm23NQO-wvbtwUFwr9S4gCITZwMniTtAaMaDLgHBJRUa8tAG5PFPPzkdo50G8cMiMZTussVPheQds3hTWEBwZkSgO4cgilWVLwT78GG5Src9lHnl7t6ofFG6xoux3qdl2FeZVX"/>
+</div>
+</div>
+</nav>
+<main class="pt-24 px-6 max-w-4xl mx-auto space-y-10">
+<!-- Header Section -->
+<header class="space-y-2">
+<h1 class="text-[3.5rem] font-extrabold tracking-tight leading-none text-on-surface-variant">Settings</h1>
+<p class="text-lg text-on-surface-variant opacity-70">Manage family archive permissions and limits.</p>
+</header>
+<!-- Family Hub Card (Signature Component) -->
+<section class="relative">
+<div class="bg-tertiary-container rounded-lg p-8 shadow-[0_20_40px_rgba(48,46,47,0.06)] flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+<div>
+<h2 class="text-sm font-bold uppercase tracking-widest text-on-tertiary-container mb-2">Daily Family Goal</h2>
+<div class="text-[3rem] font-black text-on-tertiary-container tracking-tighter leading-none">
+                        12 <span class="text-2xl font-medium tracking-normal opacity-60">cans max</span>
+</div>
+</div>
+<button class="bg-primary px-8 py-4 rounded-full text-on-primary font-bold shadow-lg hover:bg-primary-dim transition-all active:scale-95">
+                    Update Global Limit
+                </button>
+</div>
+</section>
+<!-- Family List -->
+<section class="grid grid-cols-1 md:grid-cols-2 gap-6 -mt-10">
+<!-- Member Card: Sarah -->
+<div class="bg-surface-container-lowest rounded-lg p-6 flex flex-col gap-6 shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-14 h-14 rounded-full bg-secondary-container overflow-hidden">
+<img alt="Sarah" class="w-full h-full object-cover" data-alt="Avatar of a woman with glasses" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCg80PDHruStUghsI8UXeKGpnHTcQImoTTHpkF61oTexiIjpj1WSgBW7IkE1K3eqOORov61-O1TjK1y_jTRLxOJ4H974n2VgjCikgNKN7JxSOYnkOE814H0DCM54AM-w5mdQMzpYoKWGMTSNFH9n0v_Ti5J7QAZK8Z7owqG38KrVbfRJhkRcLKaH1GI2mwrVGJA6l4Lh7v-tMBnD1ckL9c-9HZt4v7HYPPS01lOWILbpJt_CzRNI8hfZG5Y4tHsT_LIa7al-tt_COX5"/>
+</div>
+<div>
+<h3 class="text-xl font-bold text-on-surface">Sarah (Admin)</h3>
+<p class="text-sm text-on-surface-variant">The Curator</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">more_vert</span>
+</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between p-3 bg-surface-container-low rounded-md">
+<div class="flex flex-col">
+<span class="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Daily Limit</span>
+<span class="text-on-surface font-medium">2 servings</span>
+</div>
+<input class="w-16 bg-surface-container-highest border-none rounded-md text-center font-bold text-primary focus:ring-2 focus:ring-primary/40" type="number" value="2"/>
+</div>
+<div class="flex items-center justify-between">
+<span class="text-sm font-semibold text-on-surface-variant">Push Notifications</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+</div>
+</div>
+<!-- Member Card: Leo -->
+<div class="bg-surface-container-lowest rounded-lg p-6 flex flex-col gap-6 shadow-sm">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="w-14 h-14 rounded-full bg-secondary-container overflow-hidden">
+<img alt="Leo" class="w-full h-full object-cover" data-alt="Avatar of a young boy smiling" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDTwlWRZVAhl0y7hFb76N6hY_vXdrKDTPd5nWWGcm2F01GbI_S8S-_Fr1qnsFzmak0bln7gqOzD00z1kJFh5nvMphI_9L5kxt5PTYWi-QzFbdp9xl6URuQNuw6n80HbvrMsgV_cyln7YhQErJ-KoVRrQj8baVayR0iGe06hgoFIUsj88E9u_N0xPzYb2eI9g0xZOf4ltCipcuUrET_Nc_WE1UwQ0CPN1t8NfqvbZ3juo0VXi7fn40eNYrDCzLvyhY9b63TBt-WwV9DO"/>
+</div>
+<div>
+<h3 class="text-xl font-bold text-on-surface">Leo</h3>
+<p class="text-sm text-on-surface-variant">Member</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline">more_vert</span>
+</div>
+<div class="space-y-4">
+<div class="flex items-center justify-between p-3 bg-surface-container-low rounded-md">
+<div class="flex flex-col">
+<span class="text-sm font-bold text-on-surface-variant uppercase tracking-wider">Daily Limit</span>
+<span class="text-on-surface font-medium">1 serving</span>
+</div>
+<input class="w-16 bg-surface-container-highest border-none rounded-md text-center font-bold text-primary focus:ring-2 focus:ring-primary/40" type="number" value="1"/>
+</div>
+<div class="flex items-center justify-between">
+<span class="text-sm font-semibold text-on-surface-variant">Consumption Alerts</span>
+<label class="relative inline-flex items-center cursor-pointer">
+<input checked="" class="sr-only peer" type="checkbox"/>
+<div class="w-11 h-6 bg-surface-container-high rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+</label>
+</div>
+</div>
+</div>
+</section>
+<!-- Advanced Preferences Form -->
+<section class="bg-surface-container-low rounded-xl p-8 space-y-8">
+<h2 class="text-2xl font-bold text-on-surface">Privacy &amp; Archives</h2>
+<form class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<div class="space-y-2">
+<label class="block text-sm font-bold text-on-surface-variant uppercase tracking-widest">Archive Visibility</label>
+<select class="w-full bg-surface-container-highest border-none rounded-md h-12 px-4 font-medium focus:ring-2 focus:ring-primary/40">
+<option>Entire Family</option>
+<option>Admins Only</option>
+<option>Private</option>
+</select>
+</div>
+<div class="space-y-2">
+<label class="block text-sm font-bold text-on-surface-variant uppercase tracking-widest">Data Retention</label>
+<select class="w-full bg-surface-container-highest border-none rounded-md h-12 px-4 font-medium focus:ring-2 focus:ring-primary/40">
+<option>Indefinite (Forever)</option>
+<option>1 Year</option>
+<option>90 Days</option>
+</select>
+</div>
+<div class="md:col-span-2 space-y-4">
+<div class="flex items-center gap-3">
+<input class="rounded text-primary focus:ring-primary h-5 w-5 bg-surface-container-highest border-none" id="anon" type="checkbox"/>
+<label class="text-on-surface-variant font-medium" for="anon">Share anonymized data to improve family insights</label>
+</div>
+</div>
+</form>
+</section>
+<!-- Danger Zone -->
+<section class="pt-8 border-t border-surface-variant flex flex-col items-center gap-4">
+<p class="text-sm text-on-surface-variant text-center max-w-sm">Changes to family membership might take up to 24 hours to sync across all devices.</p>
+<button class="text-error font-bold flex items-center gap-2 hover:opacity-70 transition-opacity">
+<span class="material-symbols-outlined text-sm">logout</span>
+                Leave Family Group
+            </button>
+</section>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pb-6 pt-3 bg-stone-50/80 dark:bg-stone-900/80 backdrop-blur-xl fixed bottom-0 w-full rounded-t-[2.5rem] no-border tonal-shift-bg shadow-[0_-10px_40px_rgba(48,46,47,0.04)] md:hidden">
+<a class="flex flex-col items-center justify-center text-stone-500 dark:text-stone-400 px-5 py-2 hover:text-red-600 dark:hover:text-red-400" href="#">
+<span class="material-symbols-outlined mb-1">home</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-stone-500 dark:text-stone-400 px-5 py-2 hover:text-red-600 dark:hover:text-red-400" href="#">
+<span class="material-symbols-outlined mb-1">add_circle</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider">Add</span>
+</a>
+<a class="flex flex-col items-center justify-center text-stone-500 dark:text-stone-400 px-5 py-2 hover:text-red-600 dark:hover:text-red-400" href="#">
+<span class="material-symbols-outlined mb-1">analytics</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider">Insights</span>
+</a>
+<a class="flex flex-col items-center justify-center bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded-full px-5 py-2 hover:text-red-600 dark:hover:text-red-400" href="#">
+<span class="material-symbols-outlined mb-1">settings</span>
+<span class="font-['Plus_Jakarta_Sans'] text-[11px] font-semibold uppercase tracking-wider">Settings</span>
+</a>
+</nav>
+</body></html>

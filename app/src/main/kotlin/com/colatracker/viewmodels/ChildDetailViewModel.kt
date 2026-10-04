@@ -1,252 +1,296 @@
 package com.colatracker.viewmodels
 
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.colatracker.AppConfig
-import com.colatracker.data.api.ColaTrackerApi
 import com.colatracker.data.models.Child
 import com.colatracker.data.models.DrinkHistoryItem
-import com.colatracker.data.repository.ColaTrackerRepository
-import com.colatracker.data.repository.MockRepository
-import com.colatracker.data.repository.RealRepository
-import kotlinx.coroutines.delay
+import com.colatracker.data.repository.ApiProvider
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 
 /**
  * UI состояние для экрана ребёнка
  */
 sealed class ChildDetailUiState {
-    object Loading : ChildDetailUiState()
     data class Success(
         val child: Child,
         val history: List<DrinkHistoryItem>
     ) : ChildDetailUiState()
+
     data class Error(val message: String) : ChildDetailUiState()
 }
 
 /**
- * ViewModel для экрана деталей ребёнка
+ * ViewModel для экрана деталей ребёнка.
+ *
+ * Загрузка запускается не из `init`, а из экрана (`LaunchedEffect`): ViewModel
+ * живёт в сторе Activity и переиспользуется при повторном открытии того же
+ * ребёнка, поэтому данные нужно обновлять на каждый вход. Раньше работали оба
+ * механизма сразу и каждый вход стоил четырёх запросов вместо двух.
  */
 class ChildDetailViewModel(
     private val childId: Int,
     private val initialChild: Child
 ) : ViewModel() {
-    
-    private val repository: ColaTrackerRepository = if (AppConfig.USE_MOCK_DATA) {
-        MockRepository()
-    } else {
-        RealRepository(ColaTrackerApi())
-    }
-    
-    // UI состояние
+
+    // Общий на процесс репозиторий (см. ApiProvider)
+    private val repository = ApiProvider.repository
+
+    // Стартуем с уже известных данных — экран рисуется мгновенно,
+    // свежие цифры приезжают следом.
     private val _uiState = MutableStateFlow<ChildDetailUiState>(
         ChildDetailUiState.Success(initialChild, emptyList())
     )
     val uiState: StateFlow<ChildDetailUiState> = _uiState.asStateFlow()
-    
-    // Состояние добавления записи
+
+    /** Идёт первичная загрузка истории (для скелетонов). */
+    private val _isLoadingHistory = MutableStateFlow(true)
+    val isLoadingHistory: StateFlow<Boolean> = _isLoadingHistory.asStateFlow()
+
     private val _isAddingDrink = MutableStateFlow(false)
     val isAddingDrink: StateFlow<Boolean> = _isAddingDrink.asStateFlow()
 
-    // Состояние загрузки фото
     private val _isUploadingPhoto = MutableStateFlow(false)
     val isUploadingPhoto: StateFlow<Boolean> = _isUploadingPhoto.asStateFlow()
-    
-    // Сообщение об успехе/ошибке
+
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
 
-    // Флаг изменения данных (для обновления списка при возврате)
+    /** Флаг изменения данных (для обновления списка при возврате). */
     private val _hasChanges = MutableStateFlow(false)
     val hasChanges: StateFlow<Boolean> = _hasChanges.asStateFlow()
 
-    init {
-        loadChildData()
-    }
-    
     /**
-     * Загрузить данные ребёнка и историю
+     * Версия фотографии для сброса кэша Coil.
+     *
+     * Бэкенд сохраняет фото под постоянным именем (`photos/child_1.jpg`), поэтому
+     * URL после перезагрузки не меняется и Coil продолжает отдавать старую
+     * картинку. Версия добавляется в URL как `?v=...` и ломает кэш.
      */
-    private fun loadChildData() {
-        viewModelScope.launch {
-            // Не переключаем в Loading — остаёмся на Success(initial) до завершения.
-            // Резкая смена контента (Loading ↔ Success) может вызывать layout crash в Scaffold.
+    private val _photoVersion = MutableStateFlow(0L)
+    val photoVersion: StateFlow<Long> = _photoVersion.asStateFlow()
 
-            // Загружаем свежие данные ребёнка с сервера
+    /**
+     * Загрузить данные ребёнка и историю. Вызывается при входе на экран.
+     */
+    fun load() {
+        viewModelScope.launch {
+            _isLoadingHistory.value = true
+
             val childResult = repository.getChildren()
             val historyResult = repository.getChildHistory(childId)
 
             childResult
                 .onSuccess { children ->
-                    val freshChild = children.find { it.id == childId } ?: initialChild
+                    val freshChild = children.find { it.id == childId }
+                    if (freshChild == null) {
+                        _uiState.value = ChildDetailUiState.Error(
+                            "Ребёнок не найден на сервере. Возможно, его удалили."
+                        )
+                        _isLoadingHistory.value = false
+                        return@launch
+                    }
+
                     historyResult
                         .onSuccess { history ->
-                            _uiState.value = ChildDetailUiState.Success(
-                                child = freshChild,
-                                history = history
-                            )
+                            _uiState.value = ChildDetailUiState.Success(freshChild, history)
                         }
                         .onFailure { error ->
-                            // Если история не загрузилась, показываем хотя бы данные ребёнка
-                            _uiState.value = ChildDetailUiState.Success(
-                                child = freshChild,
-                                history = emptyList()
-                            )
-                            _message.value = "Ошибка загрузки истории: ${error.message}"
+                            // История не загрузилась — показываем хотя бы данные ребёнка
+                            _uiState.value = ChildDetailUiState.Success(freshChild, emptyList())
+                            _message.value = error.userMessage()
                         }
                 }
                 .onFailure { error ->
-                    _uiState.value = ChildDetailUiState.Error(
-                        error.message ?: "Ошибка загрузки данных"
-                    )
+                    _uiState.value = ChildDetailUiState.Error(error.userMessage())
                 }
+
+            _isLoadingHistory.value = false
         }
     }
-    
+
+    /** Повторить загрузку после ошибки. */
+    fun retry() = load()
+
     /**
      * Добавить запись о выпитом
      */
     fun addDrink(amountMl: Int) {
+        if (_isAddingDrink.value) return
+
         viewModelScope.launch {
             _isAddingDrink.value = true
-            
+
             repository.addDrink(childId, amountMl)
                 .onSuccess { response ->
-                    // Обновляем состояние с новыми данными
-                    val currentState = _uiState.value
-                    if (currentState is ChildDetailUiState.Success) {
-                        // Батчим обновления состояния чтобы избежать множественных remeasure
-                        _uiState.value = ChildDetailUiState.Success(
-                            child = response.child,
-                            history = listOf(response.drink) + currentState.history
-                        )
-                        _hasChanges.value = true
-                        // Задержка перед сообщением чтобы избежать state change во время measure
-                        kotlinx.coroutines.delay(50)
-                        _message.value = "Добавлено $amountMl мл"
-                    }
+                    val current = _uiState.value
+                    // Сервер вернул и обновлённого ребёнка, и созданную запись
+                    _uiState.value = ChildDetailUiState.Success(
+                        child = response.child,
+                        history = listOf(response.drink) +
+                                (current as? ChildDetailUiState.Success)?.history.orEmpty()
+                    )
+                    _hasChanges.value = true
+                    _message.value = "Добавлено $amountMl мл"
                 }
                 .onFailure { error ->
-                    kotlinx.coroutines.delay(50)
-                    _message.value = "Ошибка: ${error.message}"
+                    _message.value = error.userMessage()
                 }
 
-            // Задержка перед сбросом isLoading чтобы избежать remeasure во время draw
-            kotlinx.coroutines.delay(100)
             _isAddingDrink.value = false
         }
     }
 
     /**
-     * Удалить запись из истории
+     * Удалить запись из истории.
+     *
+     * Счётчики ребёнка не пересчитываются вручную — это дублировало бы бизнес-логику
+     * бэкенда. Запись убирается из списка сразу (быстрый отклик), а актуальные
+     * цифры подтягиваются с сервера.
      */
     fun deleteDrink(drinkId: Int) {
         viewModelScope.launch {
             repository.deleteDrink(drinkId)
-                .onSuccess { response ->
-                    // Обновляем историю - удаляем запись
-                    val currentState = _uiState.value
-                    if (currentState is ChildDetailUiState.Success) {
-                        val updatedHistory = currentState.history
-                            .filter { it.id != drinkId }
-
-                        // Пересчитываем данные ребёнка
-                        val updatedChild = currentState.child.copy(
-                            consumedThisMonth = (currentState.child.consumedThisMonth - response.deletedDrink.amountMl).coerceAtLeast(0),
-                            remaining = currentState.child.remaining + response.deletedDrink.amountMl
-                        )
-
-                        _uiState.value = ChildDetailUiState.Success(
-                            child = updatedChild,
-                            history = updatedHistory
+                .onSuccess {
+                    val current = _uiState.value
+                    if (current is ChildDetailUiState.Success) {
+                        _uiState.value = current.copy(
+                            history = current.history.filter { it.id != drinkId }
                         )
                     }
-                    _message.value = "Запись удалена"
                     _hasChanges.value = true
+                    _message.value = "Запись удалена"
+                    refreshChildCounters()
                 }
                 .onFailure { error ->
-                    _message.value = "Ошибка удаления: ${error.message}"
+                    _message.value = error.userMessage()
                 }
         }
     }
-    
+
     /**
-     * Загрузить фото ребёнка
+     * Обработать и загрузить фото (в фоне).
+     * Эффективно обрабатывает изображения любого размера без перегрузки памяти.
      */
-    /**
-     * Обработать и загрузить фото (в фоне)
-     * Эффективно обрабатывает изображения любого размера без перегрузки памяти
-     */
-    fun processAndUploadPhoto(uri: android.net.Uri, context: android.content.Context) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+    fun processAndUploadPhoto(uri: Uri, context: Context) {
+        if (_isUploadingPhoto.value) return
+
+        viewModelScope.launch {
             _isUploadingPhoto.value = true
             try {
-                // Шаг 1: Читаем размеры изображения БЕЗ загрузки в память
-                val bounds = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val opts = android.graphics.BitmapFactory.Options().apply {
-                        inJustDecodeBounds = true
+                // Обработка изображения на IO-потоке, мутации StateFlow — на Main
+                val jpegBytes = withContext(Dispatchers.IO) {
+                    // Шаг 1: Читаем размеры изображения БЕЗ загрузки в память
+                    val bounds = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val opts = BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        BitmapFactory.decodeStream(stream, null, opts)
+                        opts
                     }
-                    android.graphics.BitmapFactory.decodeStream(stream, null, opts)
-                    opts
+
+                    if (bounds == null || bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                        return@withContext null
+                    }
+
+                    // Шаг 2: Вычисляем оптимальный inSampleSize
+                    val targetSize = 1024
+                    val sampleSize = calculateInSampleSize(
+                        bounds.outWidth, bounds.outHeight, targetSize, targetSize
+                    )
+
+                    // Шаг 3: Загружаем уменьшенное изображение
+                    val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                        val opts = BitmapFactory.Options().apply {
+                            inSampleSize = sampleSize
+                            inJustDecodeBounds = false
+                        }
+                        BitmapFactory.decodeStream(stream, null, opts)
+                    } ?: return@withContext null
+
+                    // Шаг 4: Сжимаем в JPEG
+                    ByteArrayOutputStream().use { out ->
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                        bitmap.recycle()
+                        out.toByteArray()
+                    }
                 }
-                
-                if (bounds == null || bounds.outWidth <= 0 || bounds.outHeight <= 0) {
-                    _message.value = "Не удалось прочитать изображение"
+
+                if (jpegBytes == null) {
+                    _message.value = "Не удалось обработать изображение"
                     return@launch
                 }
-                
-                // Шаг 2: Вычисляем оптимальный inSampleSize для уменьшения изображения
-                val targetSize = 1024
-                val sampleSize = calculateInSampleSize(bounds.outWidth, bounds.outHeight, targetSize, targetSize)
-                
-                // Шаг 3: Загружаем уменьшенное изображение
-                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val opts = android.graphics.BitmapFactory.Options().apply {
-                        inSampleSize = sampleSize
-                        inJustDecodeBounds = false
-                    }
-                    android.graphics.BitmapFactory.decodeStream(stream, null, opts)
-                }
-                
-                if (bitmap == null) {
-                    _message.value = "Ошибка декодирования изображения"
-                    return@launch
-                }
-                
-                // Шаг 4: Сжимаем в JPEG
-                val jpegBytes = java.io.ByteArrayOutputStream().use { out ->
-                    bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
-                    bitmap.recycle() // Освобождаем память
-                    out.toByteArray()
-                }
-                
+
                 // Шаг 5: Загружаем на сервер
                 val fileName = "photo_${System.currentTimeMillis()}.jpg"
                 repository.uploadPhoto(childId, jpegBytes, fileName)
                     .onSuccess { response ->
                         _message.value = response.message
                         _hasChanges.value = true
-                        loadChildData()
+
+                        // Сбрасываем кэш картинки: путь на сервере не меняется
+                        _photoVersion.value = System.currentTimeMillis()
+
+                        val current = _uiState.value
+                        val newPhotoUrl = response.photoUrl
+                        if (current is ChildDetailUiState.Success && newPhotoUrl != null) {
+                            // Сервер уже вернул новый путь — лишний запрос не нужен
+                            _uiState.value = current.copy(
+                                child = current.child.copy(photoUrl = newPhotoUrl)
+                            )
+                        } else {
+                            load()
+                        }
                     }
                     .onFailure { error ->
-                        _message.value = "Ошибка загрузки фото: ${error.message}"
+                        _message.value = error.userMessage()
                     }
-                    
+            } catch (e: CancellationException) {
+                // Уход с экрана во время загрузки — не ошибка
+                throw e
             } catch (e: Exception) {
-                _message.value = "Ошибка: ${e.message}"
+                _message.value = "Не удалось обработать изображение: ${e.message}"
             } finally {
                 _isUploadingPhoto.value = false
             }
         }
     }
-    
+
+    fun clearMessage() {
+        _message.value = null
+    }
+
+    /** Подтянуть актуальные счётчики ребёнка, не трогая историю. */
+    private suspend fun refreshChildCounters() {
+        repository.getChildren()
+            .onSuccess { children ->
+                val fresh = children.find { it.id == childId } ?: return@onSuccess
+                val current = _uiState.value
+                if (current is ChildDetailUiState.Success) {
+                    _uiState.value = current.copy(child = fresh)
+                }
+            }
+    }
+
     /**
      * Вычисляет оптимальный inSampleSize для уменьшения изображения
      */
-    private fun calculateInSampleSize(width: Int, height: Int, reqWidth: Int, reqHeight: Int): Int {
+    private fun calculateInSampleSize(
+        width: Int,
+        height: Int,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Int {
         var inSampleSize = 1
         if (height > reqHeight || width > reqWidth) {
             val halfHeight = height / 2
@@ -256,37 +300,5 @@ class ChildDetailViewModel(
             }
         }
         return inSampleSize
-    }
-    
-    /**
-     * Загрузить фото ребёнка (прямая загрузка байтов)
-     */
-    private suspend fun uploadPhoto(imageBytes: ByteArray, fileName: String) {
-        // Этот метод оставим приватным или для внутреннего использования
-         repository.uploadPhoto(childId, imageBytes, fileName)
-            .onSuccess { response ->
-                _message.value = response.message
-                _hasChanges.value = true
-                loadChildData()
-            }
-            .onFailure { error ->
-                _message.value = "Ошибка загрузки фото: ${error.message}"
-            }
-    }
-
-
-
-    /**
-     * Очистить сообщение
-     */
-    fun clearMessage() {
-        _message.value = null
-    }
-
-    /**
-     * Обновить данные
-     */
-    fun refresh() {
-        loadChildData()
     }
 }

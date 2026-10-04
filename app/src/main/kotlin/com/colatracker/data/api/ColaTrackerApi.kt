@@ -1,10 +1,12 @@
 package com.colatracker.data.api
 
 import com.colatracker.AppConfig
+import com.colatracker.BuildConfig
 import com.colatracker.data.models.*
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.network.sockets.*
 import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.plugins.logging.*
@@ -13,14 +15,25 @@ import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import java.io.IOException
 
 /**
- * API клиент для работы с Cola Tracker API
+ * API клиент для работы с Cola Tracker API.
+ *
+ * Клиент тяжёлый (собственный пул потоков CIO), поэтому создаётся один раз
+ * на процесс — см. `ApiProvider`.
  */
 class ColaTrackerApi {
-    
+
     private val client = HttpClient(CIO) {
+        // Без этого Ktor НЕ бросает исключение на 4xx/5xx, и тело ошибки
+        // {"detail": "..."} пытается десериализоваться в ожидаемую модель,
+        // превращая понятную «401 Unauthorized» в невнятную ошибку парсинга JSON.
+        expectSuccess = true
+
         // JSON сериализация
         install(ContentNegotiation) {
             json(Json {
@@ -29,20 +42,20 @@ class ColaTrackerApi {
                 ignoreUnknownKeys = true
             })
         }
-        
-        // Логирование запросов (для отладки)
+
+        // Логирование запросов (только в debug)
         install(Logging) {
             logger = Logger.DEFAULT
-            level = LogLevel.INFO
+            level = if (BuildConfig.DEBUG) LogLevel.INFO else LogLevel.NONE
         }
-        
+
         // Таймауты
         install(HttpTimeout) {
             requestTimeoutMillis = AppConfig.REQUEST_TIMEOUT_MS
-            connectTimeoutMillis = AppConfig.REQUEST_TIMEOUT_MS
-            socketTimeoutMillis = AppConfig.REQUEST_TIMEOUT_MS
+            connectTimeoutMillis = AppConfig.CONNECT_TIMEOUT_MS
+            socketTimeoutMillis = AppConfig.SOCKET_TIMEOUT_MS
         }
-        
+
         // Дефолтные настройки запросов
         defaultRequest {
             url(AppConfig.BASE_URL)
@@ -51,109 +64,140 @@ class ColaTrackerApi {
             // ContentNegotiation автоматически обработает JSON для GET/POST с JSON телом
         }
     }
-    
+
     /**
      * Получить список всех детей
      */
-    suspend fun getChildren(): List<Child> {
-        return try {
-            client.get("/children").body()
-        } catch (e: Exception) {
-            throw ApiException("Ошибка загрузки списка детей: ${e.message}", e)
-        }
+    suspend fun getChildren(): List<Child> = safeCall("Не удалось загрузить список детей") {
+        client.get("/children").body()
     }
-    
+
     /**
      * Добавить запись о выпитом
      */
-    suspend fun addDrink(childId: Int, amountMl: Int): AddDrinkResponse {
-        return try {
+    suspend fun addDrink(childId: Int, amountMl: Int): AddDrinkResponse =
+        safeCall("Не удалось добавить запись") {
             client.post("/children/$childId/drink") {
                 contentType(ContentType.Application.Json)
                 setBody(DrinkRequest(amountMl))
             }.body()
-        } catch (e: Exception) {
-            throw ApiException("Ошибка добавления записи: ${e.message}", e)
         }
-    }
-    
+
     /**
      * Получить историю потребления для ребёнка
      */
-    suspend fun getChildHistory(childId: Int): List<DrinkHistoryItem> {
-        return try {
+    suspend fun getChildHistory(childId: Int): List<DrinkHistoryItem> =
+        safeCall("Не удалось загрузить историю") {
             client.get("/children/$childId/history").body()
-        } catch (e: Exception) {
-            throw ApiException("Ошибка загрузки истории: ${e.message}", e)
         }
-    }
-    
+
     /**
      * Удалить запись о выпитом
      */
-    suspend fun deleteDrink(drinkId: Int): DeleteDrinkResponse {
-        return try {
+    suspend fun deleteDrink(drinkId: Int): DeleteDrinkResponse =
+        safeCall("Не удалось удалить запись") {
             client.delete("/drinks/$drinkId").body()
-        } catch (e: Exception) {
-            throw ApiException("Ошибка удаления записи: ${e.message}", e)
         }
-    }
-    
+
     /**
      * Загрузить фото ребёнка
      */
-    suspend fun uploadPhoto(childId: Int, imageBytes: ByteArray, fileName: String): UploadPhotoResponse {
-        return try {
-            val response = client.post("/children/$childId/photo") {
-                // Авторизация уже установлена в defaultRequest, не дублируем
-                setBody(
-                    MultiPartFormDataContent(
-                        formData {
-                            append("file", imageBytes, Headers.build {
-                                append(HttpHeaders.ContentType, "image/jpeg")
-                                append(HttpHeaders.ContentDisposition, "form-data; name=\"file\"; filename=\"$fileName\"")
-                            })
-                        }
-                    )
+    suspend fun uploadPhoto(
+        childId: Int,
+        imageBytes: ByteArray,
+        fileName: String
+    ): UploadPhotoResponse = safeCall("Не удалось загрузить фото") {
+        client.post("/children/$childId/photo") {
+            // Авторизация уже установлена в defaultRequest, не дублируем
+            setBody(
+                MultiPartFormDataContent(
+                    formData {
+                        append("file", imageBytes, Headers.build {
+                            append(HttpHeaders.ContentType, "image/jpeg")
+                            append(
+                                HttpHeaders.ContentDisposition,
+                                "form-data; name=\"file\"; filename=\"$fileName\""
+                            )
+                        })
+                    }
                 )
-            }
-            
-            if (response.status.value in 200..299) {
-                response.body()
-            } else {
-                val errorBody = try {
-                    response.body<String>()
-                } catch (_: Exception) {
-                    "Не удалось прочитать ответ"
-                }
-                throw ApiException("Ошибка загрузки фото: ${response.status} - $errorBody", null)
-            }
-        } catch (e: Exception) {
-            if (e is ApiException) throw e
-            throw ApiException("Ошибка загрузки фото: ${e.message}", e)
-        }
+            )
+        }.body()
     }
 
     /**
-     * Проверить работу API
-     */
-    suspend fun healthCheck(): ApiResponse {
-        return try {
-            client.get("/").body()
-        } catch (e: Exception) {
-            throw ApiException("API недоступен: ${e.message}", e)
-        }
-    }
-    
-    /**
-     * Закрыть клиент
+     * Закрыть клиент. Вызывается только при завершении процесса —
+     * ViewModel'и общий клиент не закрывают.
      */
     fun close() {
         client.close()
     }
+
+    // ===== Обработка ошибок =====
+
+    /**
+     * Превращает технические исключения Ktor в понятные пользователю сообщения.
+     *
+     * `CancellationException` пробрасывается как есть — иначе отмена корутины
+     * (уход с экрана) выглядела бы как сетевая ошибка.
+     */
+    private suspend fun <T> safeCall(what: String, block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ClientRequestException) {
+            throw ApiException(clientErrorMessage(what, e), e)
+        } catch (e: ServerResponseException) {
+            throw ApiException(
+                "Сервер вернул ошибку ${e.response.status.value}. Попробуйте позже.", e
+            )
+        } catch (e: HttpRequestTimeoutException) {
+            throw ApiException("Сервер не ответил вовремя. Попробуйте ещё раз.", e)
+        } catch (e: ConnectTimeoutException) {
+            throw ApiException("Не удалось подключиться к серверу. Проверьте интернет.", e)
+        } catch (e: SocketTimeoutException) {
+            throw ApiException("Соединение с сервером прервалось. Попробуйте ещё раз.", e)
+        } catch (e: IOException) {
+            throw ApiException("Нет связи с сервером. Проверьте интернет-соединение.", e)
+        } catch (e: SerializationException) {
+            throw ApiException("Сервер вернул данные в неожиданном формате.", e)
+        } catch (e: Exception) {
+            throw ApiException("$what: ${e.message ?: "неизвестная ошибка"}", e)
+        }
+    }
+
+    private suspend fun clientErrorMessage(what: String, e: ClientRequestException): String {
+        // FastAPI отдаёт ошибки как {"detail": "..."} — показываем текст с сервера,
+        // если он есть.
+        val detail = try {
+            errorJson.decodeFromString<ErrorResponse>(e.response.bodyAsText()).detail
+        } catch (_: Exception) {
+            null
+        }
+
+        return when (e.response.status) {
+            HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden ->
+                "Неверный токен авторизации. Проверьте API_AUTH_TOKEN в local.properties."
+
+            HttpStatusCode.NotFound -> detail ?: "$what: запись не найдена на сервере."
+
+            HttpStatusCode.BadRequest -> detail ?: "$what: сервер отклонил запрос."
+
+            else -> detail ?: "$what: сервер вернул ${e.response.status.value}."
+        }
+    }
+
+    private companion object {
+        val errorJson = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+        }
+    }
 }
 
 /**
- * Кастомное исключение для API ошибок
+ * Кастомное исключение для API ошибок.
+ * `message` уже пригоден для показа пользователю.
  */
 class ApiException(message: String, cause: Throwable? = null) : Exception(message, cause)
