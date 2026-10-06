@@ -87,3 +87,9 @@ lint-results_files/
 # Python
 __pycache__/
 *.pyc
+
+# Backend: локальные данные
+backend/*.db
+backend/*.db-*
+backend/photos/
+backend/.pytest_cache/
