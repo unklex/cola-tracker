@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshContainer
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -25,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -36,12 +39,16 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
 import com.colatracker.data.models.Child
 import com.colatracker.ui.components.ChildCardSkeleton
 import com.colatracker.ui.components.ColaIcons
 import com.colatracker.ui.components.CompactGradientProgressBar
 import com.colatracker.ui.components.balanceColor
 import com.colatracker.ui.components.childPhotoUrl
+import com.colatracker.ui.components.formatLastUpdated
 import com.colatracker.ui.components.formatVolume
 import com.colatracker.ui.components.monthUsageColor
 import com.colatracker.ui.components.needsAttention
@@ -67,22 +74,51 @@ fun ChildrenListScreen(
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val quickAddFor by viewModel.quickAddFor.collectAsStateWithLifecycle()
+    val lastUpdatedMillis by viewModel.lastUpdatedMillis.collectAsStateWithLifecycle()
 
     var showQuickAddSheet by remember { mutableStateOf(false) }
     val children = (uiState as? ChildrenUiState.Success)?.children.orEmpty()
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(message) {
-        message?.let { text ->
-            snackbarHostState.showSnackbar(text)
+        message?.let { msg ->
+            val result = snackbarHostState.showSnackbar(
+                message = msg.text,
+                actionLabel = msg.retry?.let { "Повторить" },
+                duration = if (msg.retry != null) SnackbarDuration.Long else SnackbarDuration.Short
+            )
             viewModel.clearMessage()
+            if (result == SnackbarResult.ActionPerformed) {
+                // Тот же requestId: если первый запрос дошёл до сервера, дубля не будет
+                msg.retry?.let { viewModel.quickAddDrink(it.childId, it.amountMl, it.requestId) }
+            }
         }
+    }
+
+    // Жест «потянуть вниз»: запускает то же обновление, что и кнопка в шапке
+    val pullState = rememberPullToRefreshState()
+    if (pullState.isRefreshing) {
+        LaunchedEffect(true) { viewModel.refresh() }
+    }
+    LaunchedEffect(isRefreshing) {
+        if (!isRefreshing) pullState.endRefresh()
+    }
+
+    val lastUpdatedText = lastUpdatedMillis?.let {
+        formatLastUpdated(
+            updated = LocalDateTime.ofInstant(Instant.ofEpochMilli(it), ZoneId.systemDefault()),
+            now = LocalDateTime.now()
+        )
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            .then(
+                if (children.isNotEmpty()) Modifier.nestedScroll(pullState.nestedScrollConnection)
+                else Modifier
+            )
     ) {
         when (val state = uiState) {
             is ChildrenUiState.Loading -> {
@@ -97,7 +133,8 @@ fun ChildrenListScreen(
                         children = state.children,
                         onChildClick = onChildClick,
                         onRefresh = { viewModel.refresh() },
-                        onSettingsClick = onSettingsClick
+                        onSettingsClick = onSettingsClick,
+                        lastUpdatedText = lastUpdatedText
                     )
                 }
             }
@@ -110,8 +147,8 @@ fun ChildrenListScreen(
             }
         }
 
-        // Индикатор обновления
-        if (isRefreshing) {
+        // Индикатор обновления (при жесте «потянуть» вместо него работает круглый индикатор)
+        if (isRefreshing && !pullState.isRefreshing) {
             LinearProgressIndicator(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -119,6 +156,15 @@ fun ChildrenListScreen(
                     .align(Alignment.TopCenter),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = ColaTheme.containers.surfaceContainerLow
+            )
+        }
+
+        if (children.isNotEmpty()) {
+            PullToRefreshContainer(
+                state = pullState,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
             )
         }
 
@@ -297,7 +343,8 @@ private fun EffervescentHomeContent(
     children: List<Child>,
     onChildClick: (Child) -> Unit,
     onRefresh: () -> Unit,
-    onSettingsClick: () -> Unit = {}
+    onSettingsClick: () -> Unit = {},
+    lastUpdatedText: String? = null
 ) {
     // Агрегаты по семье
     val totalConsumed = children.sumOf { it.consumedThisMonth }
@@ -317,6 +364,17 @@ private fun EffervescentHomeContent(
                 onRefresh = onRefresh,
                 onSettingsClick = onSettingsClick
             )
+        }
+
+        if (lastUpdatedText != null) {
+            item(key = "updated") {
+                Text(
+                    text = lastUpdatedText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 24.dp, top = 12.dp)
+                )
+            }
         }
 
         item(key = "hero") {

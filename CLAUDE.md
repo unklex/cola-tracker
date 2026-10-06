@@ -101,6 +101,17 @@ warning colours from `remaining / monthly_limit`. Derived properties live on
 - Screens must read colours from `MaterialTheme.colorScheme` / `ColaTheme.containers`,
   never from the raw `Cola*` palette constants, or dark theme breaks
 
+### Retry and idempotency
+- Failed adds show a snackbar "Повторить" only when `ApiException.retryable` (network, timeouts, 5xx)
+- Every add tap generates one `requestId` (UUID); the retry MUST reuse it — the backend returns the
+  already-created drink for a repeated `request_id` instead of duplicating it. Never regenerate it on retry
+- ViewModel messages are `UiMessage(text, retry: RetryAddDrink?)`; screens map the snackbar action to
+  `addDrink(amount, requestId)` / `quickAddDrink(childId, amount, requestId)`
+
+### CSV export
+- `historyToCsv()` (pure, tested) → `writeHistoryCsv()` writes to `cache/exports` → `shareCsv()` opens the
+  system share sheet through the existing FileProvider. `;` separator + BOM for Russian Excel
+
 ### Images
 - Build photo URLs with `childPhotoUrl(photoUrl, version)` — the backend reuses the
   filename `photos/child_{id}.jpg`, so a version query param is required to bust
@@ -115,6 +126,13 @@ cd backend && python -m pytest -q    # backend v3 (SQLite), temporary DB
 - `ChildDetailViewModel` takes the repository as a constructor parameter (default
   `ApiProvider.repository`) so it can be tested with a fake
 - History in `ChildDetailScreen` is grouped by day (`groupHistoryByDay`, `dayLabel`)
+
+## Release signing
+`./gradlew assembleRelease` signs with the keystore from `local.properties` (`RELEASE_STORE_FILE`,
+`RELEASE_STORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`). The keystore lives OUTSIDE the repo
+(path in `RELEASE_STORE_FILE`) — back it up: losing it means no updates over an installed app.
+Without those properties release builds unsigned. A release-signed app cannot be installed over a
+debug-signed one (uninstall first).
 
 ## Backend
 `backend/` is the SQLite (v3) server with a Dockerfile — see `backend/README.md`.

@@ -54,6 +54,9 @@ class MockRepository : ColaTrackerRepository {
     )
     
     private var nextDrinkId = 4
+
+    // Как на бэкенде: повтор с тем же requestId не создаёт вторую запись
+    private val drinksByRequestId = mutableMapOf<String, DrinkHistoryItem>()
     
     override suspend fun getChildren(): Result<List<Child>> {
         // Имитируем задержку сети
@@ -61,8 +64,15 @@ class MockRepository : ColaTrackerRepository {
         return Result.success(mockChildren.toList())
     }
     
-    override suspend fun addDrink(childId: Int, amountMl: Int): Result<AddDrinkResponse> {
+    override suspend fun addDrink(childId: Int, amountMl: Int, requestId: String?): Result<AddDrinkResponse> {
         delay(300)
+
+        requestId?.let { id ->
+            drinksByRequestId[id]?.let { existing ->
+                val current = mockChildren.first { it.id == existing.childId }
+                return Result.success(AddDrinkResponse("Запись добавлена", current, existing))
+            }
+        }
         
         // Находим ребёнка
         val childIndex = mockChildren.indexOfFirst { it.id == childId }
@@ -91,6 +101,7 @@ class MockRepository : ColaTrackerRepository {
         )
         
         mockHistory.add(0, newDrink)
+        requestId?.let { drinksByRequestId[it] = newDrink }
         
         return Result.success(
             AddDrinkResponse(

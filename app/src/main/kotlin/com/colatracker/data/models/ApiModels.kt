@@ -9,7 +9,14 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class DrinkRequest(
     @SerialName("amount_ml")
-    val amountMl: Int
+    val amountMl: Int,
+
+    /**
+     * Ключ идемпотентности: при повторе запроса сервер вернёт уже созданную запись, а не
+     * добавит вторую. null — старое поведение (и совместимость со старым сервером).
+     */
+    @SerialName("request_id")
+    val requestId: String? = null
 )
 
 /**
@@ -37,18 +44,6 @@ data class DeleteDrinkResponse(
     
     @SerialName("deleted_drink")
     val deletedDrink: DrinkHistoryItem
-)
-
-/**
- * Общий ответ API с сообщением
- */
-@Serializable
-data class ApiResponse(
-    @SerialName("message")
-    val message: String,
-    
-    @SerialName("version")
-    val version: String? = null
 )
 
 /**

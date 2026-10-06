@@ -7,6 +7,8 @@ import com.colatracker.data.models.Child
 import com.colatracker.ui.theme.ProgressGreen
 import com.colatracker.ui.theme.ProgressRed
 import com.colatracker.ui.theme.ProgressYellow
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -69,6 +71,22 @@ fun formatVolume(ml: Int): String {
         "$ml мл"
     }
 }
+
+/**
+ * Подпись «когда обновлено»: «Обновлено в 12:05» сегодня, «Обновлено 05.10 в 12:05» раньше.
+ * [now] передаётся снаружи, чтобы функцию можно было проверить тестом.
+ */
+fun formatLastUpdated(updated: LocalDateTime, now: LocalDateTime): String {
+    val time = updated.format(UPDATED_TIME)
+    return if (updated.toLocalDate() == now.toLocalDate()) {
+        "Обновлено в $time"
+    } else {
+        "Обновлено ${updated.format(UPDATED_DAY)} в $time"
+    }
+}
+
+private val UPDATED_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
+private val UPDATED_DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM", Locale.ROOT)
 
 /**
  * Человеческое описание накопленного баланса в месяцах: "хватит на ~2.4 мес."

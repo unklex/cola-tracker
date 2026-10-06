@@ -22,8 +22,8 @@ android {
         applicationId = "com.colatracker"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "2.3"
+        versionCode = 5
+        versionName = "2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -38,6 +38,20 @@ android {
             "\"${localProperties.getProperty("API_BASE_URL", "http://10.0.2.2:8000")}\"")
     }
 
+    // Подпись release-сборки: keystore и пароли лежат в local.properties (не в git).
+    // Без них release собирается неподписанным — проект собирается и у тех, у кого ключа нет.
+    signingConfigs {
+        val storePath = localProperties.getProperty("RELEASE_STORE_FILE")
+        if (storePath != null) {
+            create("release") {
+                storeFile = file(storePath)
+                storePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
+                keyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
+                keyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -46,7 +60,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // TODO: настроить release signing keystore перед публикацией
+            signingConfig = signingConfigs.findByName("release")
         }
     }
     

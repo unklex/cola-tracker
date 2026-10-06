@@ -187,3 +187,90 @@ def test_import_from_legacy_json(client, tmp_path):
     assert c["consumed_this_month"] == 630  # по истории, а не устаревшие 999
     with pytest.raises(SystemExit):
         manage.import_json(str(path))  # повторный импорт в непустую базу запрещён
+
+
+# ===== ключ идемпотентности (безопасный повтор после обрыва связи) =====
+
+RID = "11111111-2222-3333-4444-555555555555"
+
+
+def post_drink(client, ml=250, rid=None, child_id=1):
+    body = {"amount_ml": ml}
+    if rid:
+        body["request_id"] = rid
+    return client.post(f"/children/{child_id}/drink", json=body, headers=AUTH)
+
+
+def test_retry_with_same_request_id_does_not_duplicate(client):
+    """Ответ потерялся, приложение повторило запрос: запись одна, баланс списан один раз."""
+    add_child()
+    first = post_drink(client, 250, RID).json()
+    retry = post_drink(client, 250, RID)
+
+    assert retry.status_code == 200
+    assert retry.json()["drink"] == first["drink"]          # та же запись, тот же id
+    assert retry.json()["child"] == first["child"]
+    assert len(client.get("/children/1/history", headers=AUTH).json()) == 1
+    c = child(client)
+    assert (c["consumed_this_month"], c["remaining"]) == (250, 750)
+
+
+def test_request_id_reused_for_different_drink_is_rejected(client):
+    add_child()
+    post_drink(client, 250, RID)
+    assert post_drink(client, 330, RID).status_code == 409     # другая сумма
+    add_child("Петя")
+    assert post_drink(client, 250, RID, child_id=2).status_code == 409  # другой ребёнок
+    assert child(client)["remaining"] == 750                   # ничего лишнего не списалось
+
+
+def test_without_request_id_behaviour_is_unchanged(client):
+    add_child()
+    post_drink(client, 100)
+    post_drink(client, 100)
+    assert len(client.get("/children/1/history", headers=AUTH).json()) == 2
+
+
+@pytest.mark.parametrize("rid", ["short", "has space in it!!", "x" * 65, "ключ-запроса-1234"])
+def test_invalid_request_id_rejected(client, rid):
+    add_child()
+    assert post_drink(client, 100, rid).status_code == 422
+
+
+def test_response_shape_has_no_internal_fields(client):
+    add_child()
+    r = post_drink(client, 100, RID).json()
+    assert set(r["drink"]) == {"id", "child_id", "amount_ml", "timestamp"}
+    deleted = client.delete(f"/drinks/{r['drink']['id']}", headers=AUTH).json()["deleted_drink"]
+    assert set(deleted) == {"id", "child_id", "amount_ml", "timestamp"}
+
+
+def test_migration_adds_request_id_to_existing_v3_database(tmp_path, monkeypatch):
+    """База, созданная до появления ключа (боевая), должна открываться и работать без потери данных."""
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    old = sqlite3.connect(db)
+    old.executescript("""
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE children (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, photo_url TEXT,
+            monthly_limit INTEGER NOT NULL, remaining INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE drinks (id INTEGER PRIMARY KEY AUTOINCREMENT, child_id INTEGER NOT NULL,
+            amount_ml INTEGER NOT NULL, timestamp TEXT NOT NULL);
+        INSERT INTO meta VALUES ('auth_token', 'test-token'), ('last_reset_date', '2026-10-01');
+        INSERT INTO children(name, monthly_limit, remaining) VALUES ('Маша', 1000, 700);
+        INSERT INTO drinks(child_id, amount_ml, timestamp) VALUES (1, 300, '2026-10-02T10:00:00');
+    """)
+    old.commit()
+    old.close()
+
+    monkeypatch.setattr(main, "DB_PATH", str(db))
+    monkeypatch.setattr(main, "PHOTOS_DIR", str(tmp_path / "photos"))
+    monkeypatch.setattr(main, "_now", lambda: datetime(2026, 10, 6, 12, 0, 0))
+    with TestClient(main.app) as c:          # lifespan вызывает init_db() -> migrate()
+        main.init_db()                        # повторный запуск миграции безопасен
+        old_history = c.get("/children/1/history", headers=AUTH).json()
+        assert [d["amount_ml"] for d in old_history] == [300]          # старые данные целы
+        assert post_drink(c, 100, RID).status_code == 200
+        assert post_drink(c, 100, RID).json()["drink"]["id"] == 2      # идемпотентность работает
+        assert len(c.get("/children/1/history", headers=AUTH).json()) == 2

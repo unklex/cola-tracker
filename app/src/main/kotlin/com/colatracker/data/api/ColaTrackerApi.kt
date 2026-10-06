@@ -75,11 +75,11 @@ class ColaTrackerApi {
     /**
      * Добавить запись о выпитом
      */
-    suspend fun addDrink(childId: Int, amountMl: Int): AddDrinkResponse =
+    suspend fun addDrink(childId: Int, amountMl: Int, requestId: String? = null): AddDrinkResponse =
         safeCall("Не удалось добавить запись") {
             client.post("/children/$childId/drink") {
                 contentType(ContentType.Application.Json)
-                setBody(DrinkRequest(amountMl))
+                setBody(DrinkRequest(amountMl, requestId))
             }.body()
         }
 
@@ -150,16 +150,17 @@ class ColaTrackerApi {
             throw ApiException(clientErrorMessage(what, e), e)
         } catch (e: ServerResponseException) {
             throw ApiException(
-                "Сервер вернул ошибку ${e.response.status.value}. Попробуйте позже.", e
+                "Сервер вернул ошибку ${e.response.status.value}. Попробуйте позже.", e,
+                retryable = true
             )
         } catch (e: HttpRequestTimeoutException) {
-            throw ApiException("Сервер не ответил вовремя. Попробуйте ещё раз.", e)
+            throw ApiException("Сервер не ответил вовремя. Попробуйте ещё раз.", e, retryable = true)
         } catch (e: ConnectTimeoutException) {
-            throw ApiException("Не удалось подключиться к серверу. Проверьте интернет.", e)
+            throw ApiException("Не удалось подключиться к серверу. Проверьте интернет.", e, retryable = true)
         } catch (e: SocketTimeoutException) {
-            throw ApiException("Соединение с сервером прервалось. Попробуйте ещё раз.", e)
+            throw ApiException("Соединение с сервером прервалось. Попробуйте ещё раз.", e, retryable = true)
         } catch (e: IOException) {
-            throw ApiException("Нет связи с сервером. Проверьте интернет-соединение.", e)
+            throw ApiException("Нет связи с сервером. Проверьте интернет-соединение.", e, retryable = true)
         } catch (e: SerializationException) {
             throw ApiException("Сервер вернул данные в неожиданном формате.", e)
         } catch (e: Exception) {
@@ -200,4 +201,9 @@ class ColaTrackerApi {
  * Кастомное исключение для API ошибок.
  * `message` уже пригоден для показа пользователю.
  */
-class ApiException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class ApiException(
+    message: String,
+    cause: Throwable? = null,
+    /** Сбой транспорта или сервера (сеть, таймаут, 5xx): повтор запроса может помочь. */
+    val retryable: Boolean = false
+) : Exception(message, cause)

@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import java.util.UUID
 
 /**
  * UI состояние для экрана ребёнка
@@ -63,8 +64,8 @@ class ChildDetailViewModel(
     private val _isUploadingPhoto = MutableStateFlow(false)
     val isUploadingPhoto: StateFlow<Boolean> = _isUploadingPhoto.asStateFlow()
 
-    private val _message = MutableStateFlow<String?>(null)
-    val message: StateFlow<String?> = _message.asStateFlow()
+    private val _message = MutableStateFlow<UiMessage?>(null)
+    val message: StateFlow<UiMessage?> = _message.asStateFlow()
 
     /** Флаг изменения данных (для обновления списка при возврате). */
     private val _hasChanges = MutableStateFlow(false)
@@ -108,7 +109,7 @@ class ChildDetailViewModel(
                         .onFailure { error ->
                             // История не загрузилась — показываем хотя бы данные ребёнка
                             _uiState.value = ChildDetailUiState.Success(freshChild, emptyList())
-                            _message.value = error.userMessage()
+                            _message.value = UiMessage(error.userMessage())
                         }
                 }
                 .onFailure { error ->
@@ -123,28 +124,36 @@ class ChildDetailViewModel(
     fun retry() = load()
 
     /**
-     * Добавить запись о выпитом
+     * Добавить запись о выпитом.
+     *
+     * [requestId] — ключ идемпотентности этого нажатия. При ошибке сети в снекбаре появляется
+     * «Повторить» с тем же ключом: если первый запрос всё-таки дошёл до сервера, дубля не будет.
      */
-    fun addDrink(amountMl: Int) {
+    fun addDrink(amountMl: Int, requestId: String = UUID.randomUUID().toString()) {
         if (_isAddingDrink.value) return
 
         viewModelScope.launch {
             _isAddingDrink.value = true
 
-            repository.addDrink(childId, amountMl)
+            repository.addDrink(childId, amountMl, requestId)
                 .onSuccess { response ->
                     val current = _uiState.value
-                    // Сервер вернул и обновлённого ребёнка, и созданную запись
-                    _uiState.value = ChildDetailUiState.Success(
-                        child = response.child,
-                        history = listOf(response.drink) +
-                                (current as? ChildDetailUiState.Success)?.history.orEmpty()
-                    )
+                    val currentHistory = (current as? ChildDetailUiState.Success)?.history.orEmpty()
+                    // Повтор уже созданной записи: не вставляем второй раз
+                    val history = if (currentHistory.any { it.id == response.drink.id }) {
+                        currentHistory
+                    } else {
+                        listOf(response.drink) + currentHistory
+                    }
+                    _uiState.value = ChildDetailUiState.Success(child = response.child, history = history)
                     _hasChanges.value = true
-                    _message.value = "Добавлено $amountMl мл"
+                    _message.value = UiMessage("Добавлено $amountMl мл")
                 }
                 .onFailure { error ->
-                    _message.value = error.userMessage()
+                    _message.value = UiMessage(
+                        text = error.userMessage(),
+                        retry = if (error.isRetryable()) RetryAddDrink(childId, amountMl, requestId) else null
+                    )
                 }
 
             _isAddingDrink.value = false
@@ -169,11 +178,11 @@ class ChildDetailViewModel(
                         )
                     }
                     _hasChanges.value = true
-                    _message.value = "Запись удалена"
+                    _message.value = UiMessage("Запись удалена")
                     refreshChildCounters()
                 }
                 .onFailure { error ->
-                    _message.value = error.userMessage()
+                    _message.value = UiMessage(error.userMessage())
                 }
         }
     }
@@ -227,7 +236,7 @@ class ChildDetailViewModel(
                 }
 
                 if (jpegBytes == null) {
-                    _message.value = "Не удалось обработать изображение"
+                    _message.value = UiMessage("Не удалось обработать изображение")
                     return@launch
                 }
 
@@ -235,7 +244,7 @@ class ChildDetailViewModel(
                 val fileName = "photo_${System.currentTimeMillis()}.jpg"
                 repository.uploadPhoto(childId, jpegBytes, fileName)
                     .onSuccess { response ->
-                        _message.value = response.message
+                        _message.value = UiMessage(response.message)
                         _hasChanges.value = true
 
                         // Сбрасываем кэш картинки: путь на сервере не меняется
@@ -253,13 +262,13 @@ class ChildDetailViewModel(
                         }
                     }
                     .onFailure { error ->
-                        _message.value = error.userMessage()
+                        _message.value = UiMessage(error.userMessage())
                     }
             } catch (e: CancellationException) {
                 // Уход с экрана во время загрузки — не ошибка
                 throw e
             } catch (e: Exception) {
-                _message.value = "Не удалось обработать изображение: ${e.message}"
+                _message.value = UiMessage("Не удалось обработать изображение: ${e.message}")
             } finally {
                 _isUploadingPhoto.value = false
             }

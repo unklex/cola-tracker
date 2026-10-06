@@ -15,6 +15,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -50,6 +51,8 @@ import com.colatracker.ui.components.monthUsageColor
 import com.colatracker.ui.theme.ColaRed
 import com.colatracker.viewmodels.ChildDetailUiState
 import com.colatracker.viewmodels.ChildDetailViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import java.io.File
 import java.time.LocalDate
 
@@ -88,6 +91,7 @@ fun ChildDetailScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     var showPhotoBottomSheet by remember { mutableStateOf(false) }
     var tempPhotoUri by remember { mutableStateOf<Uri?>(null) }
@@ -129,10 +133,20 @@ fun ChildDetailScreen(
     LaunchedEffect(message) {
         message?.let { msg ->
             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-            snackbarHostState.showSnackbar(msg)
+            val result = snackbarHostState.showSnackbar(
+                message = msg.text,
+                actionLabel = msg.retry?.let { "Повторить" },
+                duration = if (msg.retry != null) SnackbarDuration.Long else SnackbarDuration.Short
+            )
             viewModel.clearMessage()
+            if (result == SnackbarResult.ActionPerformed) {
+                // Тот же requestId: если первый запрос дошёл до сервера, дубля не будет
+                msg.retry?.let { viewModel.addDrink(it.amountMl, it.requestId) }
+            }
         }
     }
+
+    val currentHistory = (uiState as? ChildDetailUiState.Success)?.history.orEmpty()
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -142,7 +156,33 @@ fun ChildDetailScreen(
         ) {
             ColaDetailTopAppBar(
                 title = child.name,
-                onNavigateBack = { onNavigateBack(hasChanges) }
+                onNavigateBack = { onNavigateBack(hasChanges) },
+                actions = {
+                    IconButton(onClick = {
+                        if (currentHistory.isEmpty()) {
+                            scope.launch { snackbarHostState.showSnackbar("История пуста — нечего экспортировать") }
+                        } else {
+                            scope.launch {
+                                try {
+                                    val uri = writeHistoryCsv(context, child.name, currentHistory)
+                                    shareCsv(context, uri, child.name)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(
+                                        "Не удалось подготовить файл: ${e.message ?: "ошибка записи"}"
+                                    )
+                                }
+                            }
+                        }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Экспорт истории в CSV",
+                            tint = Color.White
+                        )
+                    }
+                }
             )
 
             when (val state = uiState) {

@@ -10,7 +10,7 @@ import kotlinx.coroutines.CancellationException
  */
 interface ColaTrackerRepository {
     suspend fun getChildren(): Result<List<Child>>
-    suspend fun addDrink(childId: Int, amountMl: Int): Result<AddDrinkResponse>
+    suspend fun addDrink(childId: Int, amountMl: Int, requestId: String? = null): Result<AddDrinkResponse>
     suspend fun getChildHistory(childId: Int): Result<List<DrinkHistoryItem>>
     suspend fun deleteDrink(drinkId: Int): Result<DeleteDrinkResponse>
     suspend fun uploadPhoto(
@@ -44,8 +44,8 @@ class RealRepository(private val api: ColaTrackerApi) : ColaTrackerRepository {
     override suspend fun getChildren(): Result<List<Child>> =
         apiResult { api.getChildren() }
 
-    override suspend fun addDrink(childId: Int, amountMl: Int): Result<AddDrinkResponse> =
-        apiResult { api.addDrink(childId, amountMl) }
+    override suspend fun addDrink(childId: Int, amountMl: Int, requestId: String?): Result<AddDrinkResponse> =
+        apiResult { api.addDrink(childId, amountMl, requestId) }
 
     override suspend fun getChildHistory(childId: Int): Result<List<DrinkHistoryItem>> =
         apiResult { api.getChildHistory(childId) }

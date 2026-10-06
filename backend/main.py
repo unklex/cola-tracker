@@ -48,10 +48,24 @@ CREATE TABLE IF NOT EXISTS drinks (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     child_id  INTEGER NOT NULL REFERENCES children(id) ON DELETE CASCADE,
     amount_ml INTEGER NOT NULL,
-    timestamp TEXT NOT NULL
+    timestamp TEXT NOT NULL,
+    -- ключ идемпотентности от клиента: повтор запроса не создаёт вторую запись
+    request_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_drinks_child_ts ON drinks(child_id, timestamp);
 """
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Доводит старую базу до текущей схемы (v3 без request_id -> с request_id). Повторный вызов безопасен."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(drinks)").fetchall()}
+    if "request_id" not in columns:
+        conn.execute("ALTER TABLE drinks ADD COLUMN request_id TEXT")
+    # Уникален только заданный ключ; NULL (старые записи, клиенты без ключа) не конфликтуют
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_drinks_request_id ON drinks(request_id) "
+        "WHERE request_id IS NOT NULL"
+    )
 
 
 # ===== БАЗА ДАННЫХ =====
@@ -98,6 +112,7 @@ def init_db() -> None:
     try:
         conn.execute("PRAGMA journal_mode = WAL")
         conn.executescript(SCHEMA)
+        migrate(conn)
         conn.execute("BEGIN IMMEDIATE")
         has_token = conn.execute("SELECT 1 FROM meta WHERE key = 'auth_token'").fetchone()
         if not has_token:
@@ -164,6 +179,9 @@ def fetch_children(conn: sqlite3.Connection, today: date, child_id: Optional[int
 
 class DrinkRequest(BaseModel):
     amount_ml: int = Field(gt=0, le=MAX_DRINK_ML)  # мл
+    # Необязательный ключ идемпотентности (UUID от приложения). Повтор с тем же ключом —
+    # например, после обрыва связи, когда ответ потерялся, — вернёт уже созданную запись.
+    request_id: Optional[str] = Field(default=None, min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ChildResponse(BaseModel):
@@ -241,16 +259,35 @@ def add_drink(child_id: int, drink: DrinkRequest, authorized: bool = Security(ve
         if not conn.execute("SELECT 1 FROM children WHERE id = ?", (child_id,)).fetchone():
             raise _child_not_found(child_id)
 
+        if drink.request_id:
+            existing = conn.execute(
+                "SELECT id, child_id, amount_ml, timestamp FROM drinks WHERE request_id = ?",
+                (drink.request_id,),
+            ).fetchone()
+            if existing:
+                if existing["child_id"] != child_id or existing["amount_ml"] != drink.amount_ml:
+                    raise HTTPException(
+                        status_code=409, detail="Ключ запроса уже использован для другой записи"
+                    )
+                # Повтор уже выполненного запроса: ничего не меняем, отдаём то же, что и в первый раз
+                return {
+                    "message": "Запись добавлена",
+                    "child": fetch_children(conn, now.date(), child_id)[0],
+                    "drink": dict(existing),
+                }
+
         cur = conn.execute(
-            "INSERT INTO drinks(child_id, amount_ml, timestamp) VALUES (?, ?, ?)",
-            (child_id, drink.amount_ml, now.isoformat()),
+            "INSERT INTO drinks(child_id, amount_ml, timestamp, request_id) VALUES (?, ?, ?, ?)",
+            (child_id, drink.amount_ml, now.isoformat(), drink.request_id),
         )
         conn.execute(
             "UPDATE children SET remaining = remaining - ? WHERE id = ?",
             (drink.amount_ml, child_id),
         )
         new_drink = dict(
-            conn.execute("SELECT * FROM drinks WHERE id = ?", (cur.lastrowid,)).fetchone()
+            conn.execute(
+                "SELECT id, child_id, amount_ml, timestamp FROM drinks WHERE id = ?", (cur.lastrowid,)
+            ).fetchone()
         )
         child = fetch_children(conn, now.date(), child_id)[0]
     return {"message": "Запись добавлена", "child": child, "drink": new_drink}
@@ -271,7 +308,9 @@ def get_history(child_id: int, authorized: bool = Security(verify_token)):
 def delete_drink(drink_id: int, authorized: bool = Security(verify_token)):
     with db(write=True) as conn:
         apply_monthly_topup(conn, _now().date())
-        row = conn.execute("SELECT * FROM drinks WHERE id = ?", (drink_id,)).fetchone()
+        row = conn.execute(
+            "SELECT id, child_id, amount_ml, timestamp FROM drinks WHERE id = ?", (drink_id,)
+        ).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail=f"Запись с ID {drink_id} не найдена")
         deleted = dict(row)

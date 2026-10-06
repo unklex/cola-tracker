@@ -380,9 +380,7 @@ private fun AboutSection() {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Divider, а не HorizontalDivider: последний появился только в material3 1.2,
-        // а compose-bom 2024.01.00 приносит 1.1.2
-        Divider(color = MaterialTheme.colorScheme.outlineVariant)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         Spacer(modifier = Modifier.height(4.dp))
 
