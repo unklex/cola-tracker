@@ -48,7 +48,7 @@ echo '30 3 * * * root /usr/local/bin/colatracker-backup.sh >> /var/log/colatrack
 ```bash
 docker compose stop
 gunzip -c /var/backups/colatracker/cola-ГГГГММДД-ЧЧММСС.db.gz > /tmp/cola.db
-docker run --rm -v colatracker_cola-data:/data -v /tmp/cola.db:/restore.db:ro python:3.12-slim   sh -c 'cp /restore.db /data/cola.db && rm -f /data/cola.db-wal /data/cola.db-shm && chown 10001 /data/cola.db'
+docker run --rm -v colatracker_cola-data:/data -v /tmp/cola.db:/restore.db:ro python:3.12-slim   sh -c 'cp /restore.db /data/cola.db && rm -f /data/cola.db-wal /data/cola.db-shm && mkdir -p /data/photos && chown -R 10001 /data'
 docker compose start
 ```
 
