@@ -1,0 +1,18 @@
+services:
+  colatracker:
+    build: .
+    container_name: colatracker
+    restart: unless-stopped
+    # Токен берётся из .env (COLA_AUTH_TOKEN=...) и нужен только при создании новой базы.
+    # Если импортируете data.json, токен переносится из него.
+    environment:
+      COLA_AUTH_TOKEN: ${COLA_AUTH_TOKEN:-}
+    volumes:
+      - cola-data:/data   # база cola.db и фото переживают пересборку контейнера
+    # Порт 8000 наружу — как сейчас (приложение ходит на http://IP:8000).
+    # Когда появится HTTPS через nginx, замените на "127.0.0.1:8000:8000".
+    ports:
+      - "8000:8000"
+
+volumes:
+  cola-data:

@@ -10,13 +10,14 @@ Requirements:
     pip install requests
 """
 
+import os
 import requests
 import time
 from datetime import datetime
 
 # Configuration
 BASE_URL = "http://<SERVER_IP>:8000"
-AUTH_TOKEN = "REDACTED_OLD_TOKEN"
+AUTH_TOKEN = os.environ["COLA_TOKEN"]
 
 # Headers for authenticated requests
 HEADERS = {

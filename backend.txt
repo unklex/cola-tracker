@@ -10,6 +10,7 @@ from typing import Optional, List
 from datetime import datetime
 import json
 import os
+import secrets
 import shutil
 
 # ===== СОЗДАЁМ ПРИЛОЖЕНИЕ FASTAPI =====
@@ -93,7 +94,7 @@ def load_data() -> dict:
         # Если файл не существует, создаём базовую структуру данных
         print(f"[WARNING] Файл {DATA_FILE} не найден. Создаю базовую структуру.")
         base_data = {
-            "auth_token": "REDACTED_OLD_TOKEN",  # Токен авторизации по умолчанию
+            "auth_token": secrets.token_urlsafe(48),  # Токен авторизации по умолчанию
             "children": [],  # Пустой список детей
             "drinks_history": [],  # Пустая история потребления
             "last_reset_date": datetime.now().date().isoformat()  # Дата последнего обновления лимитов

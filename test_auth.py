@@ -1,7 +1,8 @@
+import os
 import requests
 
 BASE_URL = "http://<SERVER_IP>:8000"
-TOKEN = "REDACTED_OLD_TOKEN"
+TOKEN = os.environ["COLA_TOKEN"]
 
 def test_auth():
     print(f"Testing connection to {BASE_URL}...")

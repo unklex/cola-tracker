@@ -8,6 +8,7 @@
 """
 import argparse
 import json
+import os
 import sys
 
 import main
@@ -17,6 +18,9 @@ def import_json(path: str) -> None:
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
+    # Токен из data.json становится токеном новой базы (init_db не будет генерировать свой)
+    if data.get("auth_token"):
+        os.environ["COLA_AUTH_TOKEN"] = data["auth_token"]
     main.init_db()
     today = main._now().date()
 
@@ -26,6 +30,7 @@ def import_json(path: str) -> None:
 
         if data.get("auth_token"):
             conn.execute("UPDATE meta SET value = ? WHERE key = 'auth_token'", (data["auth_token"],))
+
         if data.get("last_reset_date"):
             conn.execute(
                 "UPDATE meta SET value = ? WHERE key = 'last_reset_date'",
