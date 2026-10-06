@@ -32,10 +32,25 @@ curl -s http://127.0.0.1:8000/
 
 ## Бэкап
 
+`backup.sh` делает согласованный снимок базы (SQLite backup API) и архив фото, проверяет
+`integrity_check`, хранит 14 дней. На сервере уже стоит в cron (каждую ночь в 03:30):
+
 ```bash
-docker compose exec colatracker python -c "import sqlite3; s=sqlite3.connect('/data/cola.db'); d=sqlite3.connect('/data/backup.db'); s.backup(d)"
+install -m 755 backup.sh /usr/local/bin/colatracker-backup.sh
+echo '30 3 * * * root /usr/local/bin/colatracker-backup.sh >> /var/log/colatracker-backup.log 2>&1' > /etc/cron.d/colatracker-backup
 ```
-(или копируйте том целиком; для регулярного бэкапа удобнее cron + `docker cp`).
+
+Файлы: `/var/backups/colatracker/cola-*.db.gz`, `photos-*.tar.gz`. Они лежат на том же сервере —
+периодически забирайте каталог к себе (`scp -r root@сервер:/var/backups/colatracker .`).
+
+Восстановление (контейнер остановить, затем подменить базу):
+
+```bash
+docker compose stop
+gunzip -c /var/backups/colatracker/cola-ГГГГММДД-ЧЧММСС.db.gz > /tmp/cola.db
+docker run --rm -v colatracker_cola-data:/data -v /tmp/cola.db:/restore.db:ro python:3.12-slim   sh -c 'cp /restore.db /data/cola.db && rm -f /data/cola.db-wal /data/cola.db-shm && chown 10001 /data/cola.db'
+docker compose start
+```
 
 ## Управление
 
