@@ -226,8 +226,9 @@ def add_drink(
             detail=f"Ребёнок с ID {child_id} не найден"
         )
 
-    # Создаём новую запись для истории с уникальным ID
-    new_drink_id = len(data["drinks_history"]) + 1
+    # Создаём новую запись для истории с уникальным ID.
+    # len()+1 нельзя: после удаления записи из середины ID совпал бы с существующим.
+    new_drink_id = max((d["id"] for d in data["drinks_history"]), default=0) + 1
     new_drink = {
         "id": new_drink_id,
         "child_id": child_id,

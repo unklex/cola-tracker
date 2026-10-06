@@ -75,7 +75,8 @@ class MockRepository : ColaTrackerRepository {
         // Обновляем счётчики
         val updatedChild = child.copy(
             consumedThisMonth = child.consumedThisMonth + amountMl,
-            remaining = (child.remaining - amountMl).coerceAtLeast(0)
+            // Как на бэкенде: баланс может уйти в минус
+            remaining = child.remaining - amountMl
         )
         mockChildren[childIndex] = updatedChild
         
