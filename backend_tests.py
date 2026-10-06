@@ -16,7 +16,7 @@ import time
 from datetime import datetime
 
 # Configuration
-BASE_URL = "http://<SERVER_IP>:8000"
+BASE_URL = os.environ.get("COLA_URL", "http://localhost:8000")
 AUTH_TOKEN = os.environ["COLA_TOKEN"]
 
 # Headers for authenticated requests

@@ -35,7 +35,7 @@ android {
         buildConfigField("String", "API_AUTH_TOKEN",
             "\"${localProperties.getProperty("API_AUTH_TOKEN", "")}\"")
         buildConfigField("String", "API_BASE_URL",
-            "\"${localProperties.getProperty("API_BASE_URL", "http://<SERVER_IP>:8000")}\"")
+            "\"${localProperties.getProperty("API_BASE_URL", "http://10.0.2.2:8000")}\"")
     }
 
     buildTypes {

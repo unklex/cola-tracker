@@ -93,3 +93,10 @@ backend/*.db
 backend/*.db-*
 backend/photos/
 backend/.pytest_cache/
+
+# IDE и локальные настройки
+.idea/
+.claude/
+
+# Локальный адрес реального сервера (cleartext) для debug-сборки
+app/src/debug/res/xml/network_security_config.xml

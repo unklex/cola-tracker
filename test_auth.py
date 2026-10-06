@@ -1,7 +1,7 @@
 import os
 import requests
 
-BASE_URL = "http://<SERVER_IP>:8000"
+BASE_URL = os.environ.get("COLA_URL", "http://localhost:8000")
 TOKEN = os.environ["COLA_TOKEN"]
 
 def test_auth():
