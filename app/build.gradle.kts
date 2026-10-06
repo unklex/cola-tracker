@@ -79,7 +79,10 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // BOM 2024.01.00 тянет material3 1.1.2 вместе с compose-animation 1.6.0 — эта пара
+    // несовместима: любой неопределённый LinearProgressIndicator/CircularProgressIndicator
+    // падает с NoSuchMethodError (KeyframesSpecConfig.at). material3 1.2.0 собран под Compose 1.6.
+    implementation("androidx.compose.material3:material3:1.2.0")
     implementation("androidx.activity:activity-compose:1.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     // navigation-compose не используется: навигация сделана вручную в MainActivity

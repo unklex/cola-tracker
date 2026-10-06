@@ -91,9 +91,13 @@ warning colours from `remaining / monthly_limit`. Derived properties live on
 - `BackHandler` handles the system back button; without it back closes the app
 
 ### Theming
-- Material3 1.1.2 (compose-bom 2024.01.00) has **no** `surfaceContainer*` colour
-  roles and **no** `HorizontalDivider`/`OutlinedTextFieldDefaults` — use
-  `ColaTheme.containers.*`, `Divider`, and `TextFieldDefaults` instead
+- compose-bom 2024.01.00 pins material3 **1.1.2**, which is binary-incompatible with
+  its own compose-animation 1.6.0: any indeterminate `LinearProgressIndicator` /
+  `CircularProgressIndicator` crashes with `NoSuchMethodError KeyframesSpecConfig.at`.
+  `app/build.gradle.kts` therefore overrides it with material3 **1.2.0** — do not
+  remove that override while the BOM stays at 2024.01.00
+- material3 1.2.0 still has **no** `surfaceContainer*` colour roles (added in 1.3) —
+  use `ColaTheme.containers.*`. The project keeps using `Divider` and `TextFieldDefaults`
 - Screens must read colours from `MaterialTheme.colorScheme` / `ColaTheme.containers`,
   never from the raw `Cola*` palette constants, or dark theme breaks
 
