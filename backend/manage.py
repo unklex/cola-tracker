@@ -44,21 +44,25 @@ def import_json(path: str) -> None:
                 (c["id"], c["name"], c.get("photo_url"), c["monthly_limit"], c["remaining"]),
             )
 
-        reassigned = 0
+        # В v2 id считался как len()+1 и мог дублироваться. Сначала вставляем записи с их
+        # исходными id (первое вхождение), и только потом дубликаты — им выдаётся свежий id.
+        # Иначе новый id мог бы занять id ещё не вставленной записи и «сдвинуть» остальные.
+        seen, duplicates = set(), []
         for d in data.get("drinks_history", []):
-            # В v2 id считался как len()+1 и мог дублироваться — дубликатам даём новый id
-            taken = conn.execute("SELECT 1 FROM drinks WHERE id = ?", (d["id"],)).fetchone()
-            if taken:
-                reassigned += 1
-                conn.execute(
-                    "INSERT INTO drinks(child_id, amount_ml, timestamp) VALUES (?, ?, ?)",
-                    (d["child_id"], d["amount_ml"], d["timestamp"]),
-                )
-            else:
-                conn.execute(
-                    "INSERT INTO drinks(id, child_id, amount_ml, timestamp) VALUES (?, ?, ?, ?)",
-                    (d["id"], d["child_id"], d["amount_ml"], d["timestamp"]),
-                )
+            if d["id"] in seen:
+                duplicates.append(d)
+                continue
+            seen.add(d["id"])
+            conn.execute(
+                "INSERT INTO drinks(id, child_id, amount_ml, timestamp) VALUES (?, ?, ?, ?)",
+                (d["id"], d["child_id"], d["amount_ml"], d["timestamp"]),
+            )
+        for d in duplicates:
+            conn.execute(
+                "INSERT INTO drinks(child_id, amount_ml, timestamp) VALUES (?, ?, ?)",
+                (d["child_id"], d["amount_ml"], d["timestamp"]),
+            )
+        reassigned = len(duplicates)
 
         # Расход месяца теперь считается по истории — предупредим, если старый счётчик с ней не сходился
         derived = {c["id"]: c["consumed_this_month"] for c in main.fetch_children(conn, today)}

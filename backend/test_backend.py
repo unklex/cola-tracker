@@ -168,6 +168,7 @@ def test_import_from_legacy_json(client, tmp_path):
         "drinks_history": [
             {"id": 1, "child_id": 1, "amount_ml": 250, "timestamp": "2026-10-02T10:00:00"},
             {"id": 1, "child_id": 1, "amount_ml": 330, "timestamp": "2026-10-03T10:00:00"},
+            {"id": 2, "child_id": 1, "amount_ml": 50, "timestamp": "2026-10-04T10:00:00"},
         ],
     }
     path = tmp_path / "data.json"
@@ -176,9 +177,13 @@ def test_import_from_legacy_json(client, tmp_path):
 
     h = {"Authorization": "Bearer legacy-token"}
     history = client.get("/children/1/history", headers=h).json()
-    assert len(history) == 2 and len({d["id"] for d in history}) == 2
+    assert len(history) == 3 and len({d["id"] for d in history}) == 3
+    by_amount = {d["amount_ml"]: d["id"] for d in history}
+    # уникальные id сохранены (раньше новый id дубликата «сдвигал» все следующие записи)
+    assert by_amount[250] == 1 and by_amount[50] == 2
+    assert by_amount[330] == 3  # дубликат получил свежий id
     c = client.get("/children", headers=h).json()[0]
     assert c["remaining"] == 400
-    assert c["consumed_this_month"] == 580  # по истории, а не устаревшие 999
+    assert c["consumed_this_month"] == 630  # по истории, а не устаревшие 999
     with pytest.raises(SystemExit):
         manage.import_json(str(path))  # повторный импорт в непустую базу запрещён
