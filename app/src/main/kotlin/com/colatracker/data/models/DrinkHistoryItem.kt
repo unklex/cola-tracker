@@ -81,3 +81,40 @@ data class DrinkHistoryItem(
             DateTimeFormatter.ofPattern("HH:mm", Locale.ROOT)
     }
 }
+
+/**
+ * Записи одного дня с суммой выпитого.
+ * [date] == null — записи, у которых не удалось разобрать метку времени.
+ */
+data class DrinkDayGroup(
+    val date: LocalDate?,
+    val items: List<DrinkHistoryItem>
+) {
+    val totalMl: Int
+        get() = items.sumOf { it.amountMl }
+}
+
+/**
+ * Группирует историю по дням, сохраняя порядок (новые дни сверху, как пришло с сервера).
+ * Записи без разобранной даты уходят в конец отдельной группой.
+ */
+fun groupHistoryByDay(history: List<DrinkHistoryItem>): List<DrinkDayGroup> {
+    val byDate = history.groupBy { it.dateOrNull() }
+    val dated = byDate.filterKeys { it != null }.map { (date, items) -> DrinkDayGroup(date, items) }
+    val undated = byDate[null]?.let { listOf(DrinkDayGroup(null, it)) }.orEmpty()
+    return dated + undated
+}
+
+/**
+ * Подпись дня для заголовка группы: «Сегодня», «Вчера» или дата.
+ * [today] передаётся снаружи, чтобы функцию можно было проверить тестом.
+ */
+fun dayLabel(date: LocalDate?, today: LocalDate): String = when (date) {
+    null -> "Без даты"
+    today -> "Сегодня"
+    today.minusDays(1) -> "Вчера"
+    else -> date.format(DAY_LABEL_FORMAT)
+}
+
+private val DAY_LABEL_FORMAT: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("dd.MM.yyyy", Locale.ROOT)

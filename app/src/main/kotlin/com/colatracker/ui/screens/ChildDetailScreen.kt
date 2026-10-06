@@ -34,6 +34,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.colatracker.data.models.Child
 import com.colatracker.data.models.DrinkHistoryItem
+import com.colatracker.data.models.dayLabel
+import com.colatracker.data.models.groupHistoryByDay
 import com.colatracker.ui.components.AnimatedCounter
 import com.colatracker.ui.components.CircularProgressAvatar
 import com.colatracker.ui.components.ColaDetailTopAppBar
@@ -49,6 +51,7 @@ import com.colatracker.ui.theme.ColaRed
 import com.colatracker.viewmodels.ChildDetailUiState
 import com.colatracker.viewmodels.ChildDetailViewModel
 import java.io.File
+import java.time.LocalDate
 
 /**
  * Экран деталей ребёнка
@@ -364,8 +367,9 @@ private fun MonthUsageSection(child: Child) {
     }
 }
 
+// internal, а не private: экран проверяется UI-тестом (androidTest)
 @Composable
-private fun QuickAmountSelector(
+internal fun QuickAmountSelector(
     isLoading: Boolean,
     onAmountSelected: (Int) -> Unit
 ) {
@@ -559,20 +563,57 @@ private fun HistorySection(
             }
 
             else -> {
-                history.forEach { drink ->
-                    DrinkHistoryItemCard(
-                        item = drink,
-                        onDelete = { onDeleteDrink(drink.id) }
+                val groups = remember(history) { groupHistoryByDay(history) }
+                val today = remember { LocalDate.now() }
+                groups.forEach { group ->
+                    DayHeader(
+                        label = dayLabel(group.date, today),
+                        totalMl = group.totalMl
                     )
+                    group.items.forEach { drink ->
+                        DrinkHistoryItemCard(
+                            item = drink,
+                            // Дата уже в заголовке группы — в карточке только время
+                            showDate = group.date == null,
+                            onDelete = { onDeleteDrink(drink.id) }
+                        )
+                    }
                 }
             }
         }
     }
 }
 
+/**
+ * Заголовок дня в истории: «Сегодня · 580 мл».
+ */
+@Composable
+private fun DayHeader(label: String, totalMl: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp, start = 4.dp, end = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = formatVolume(totalMl),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 @Composable
 private fun DrinkHistoryItemCard(
     item: DrinkHistoryItem,
+    showDate: Boolean,
     onDelete: () -> Unit
 ) {
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -615,7 +656,7 @@ private fun DrinkHistoryItemCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = item.getFormattedDateTime(),
+                        text = if (showDate) item.getFormattedDateTime() else item.getFormattedTime(),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

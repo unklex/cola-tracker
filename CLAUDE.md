@@ -91,12 +91,12 @@ warning colours from `remaining / monthly_limit`. Derived properties live on
 - `BackHandler` handles the system back button; without it back closes the app
 
 ### Theming
-- compose-bom 2024.01.00 pins material3 **1.1.2**, which is binary-incompatible with
-  its own compose-animation 1.6.0: any indeterminate `LinearProgressIndicator` /
-  `CircularProgressIndicator` crashes with `NoSuchMethodError KeyframesSpecConfig.at`.
-  `app/build.gradle.kts` therefore overrides it with material3 **1.2.0** — do not
-  remove that override while the BOM stays at 2024.01.00
-- material3 1.2.0 still has **no** `surfaceContainer*` colour roles (added in 1.3) —
+- Do NOT go back to compose-bom 2024.01.00: it pairs material3 1.1.2 with compose-animation
+  1.6.0, which are binary-incompatible — any indeterminate `LinearProgressIndicator` /
+  `CircularProgressIndicator` (shown while adding a drink) crashes with
+  `NoSuchMethodError KeyframesSpecConfig.at`. The BOM is 2024.06.00 (material3 1.2.1);
+  `QuickAmountSelectorTest` (androidTest) guards against this regression
+- material3 1.2.x still has **no** `surfaceContainer*` colour roles (added in 1.3) —
   use `ColaTheme.containers.*`. The project keeps using `Divider` and `TextFieldDefaults`
 - Screens must read colours from `MaterialTheme.colorScheme` / `ColaTheme.containers`,
   never from the raw `Cola*` palette constants, or dark theme breaks
@@ -106,6 +106,21 @@ warning colours from `remaining / monthly_limit`. Derived properties live on
   filename `photos/child_{id}.jpg`, so a version query param is required to bust
   Coil's cache after re-upload
 
+## Tests
+```bash
+./gradlew testDebugUnitTest          # unit: Child, history grouping, ChildDetailViewModel (fake repo)
+./gradlew connectedDebugAndroidTest  # UI (Compose), needs an emulator/device
+cd backend && python -m pytest -q    # backend v3 (SQLite), temporary DB
+```
+- `ChildDetailViewModel` takes the repository as a constructor parameter (default
+  `ApiProvider.repository`) so it can be tested with a fake
+- History in `ChildDetailScreen` is grouped by day (`groupHistoryByDay`, `dayLabel`)
+
+## Backend
+`backend/` is the SQLite (v3) server with a Dockerfile — see `backend/README.md`.
+`backend.txt` is the legacy v2 (data.json) source. The API token comes from
+`API_AUTH_TOKEN` in `local.properties`; never hardcode it (tests read `COLA_TOKEN`).
+
 ## Code Conventions
 - Classes: PascalCase
 - Functions/variables: camelCase
@@ -114,7 +129,7 @@ warning colours from `remaining / monthly_limit`. Derived properties live on
 - Package: `com.colatracker.*`
 
 ## Dependencies (Key)
-- Compose BOM 2024.01.00
+- Compose BOM 2024.06.00 (needs Kotlin 1.9.22 / compose compiler 1.5.8, compileSdk 34)
 - Ktor Client 2.3.7 (CIO engine)
 - Kotlinx Serialization 1.6.2
 - Kotlinx Coroutines 1.7.3

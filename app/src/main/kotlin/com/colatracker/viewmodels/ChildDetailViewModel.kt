@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.colatracker.data.models.Child
 import com.colatracker.data.models.DrinkHistoryItem
 import com.colatracker.data.repository.ApiProvider
+import com.colatracker.data.repository.ColaTrackerRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,11 +41,10 @@ sealed class ChildDetailUiState {
  */
 class ChildDetailViewModel(
     private val childId: Int,
-    private val initialChild: Child
+    private val initialChild: Child,
+    // Общий на процесс репозиторий (см. ApiProvider); в тестах подменяется фейком
+    private val repository: ColaTrackerRepository = ApiProvider.repository
 ) : ViewModel() {
-
-    // Общий на процесс репозиторий (см. ApiProvider)
-    private val repository = ApiProvider.repository
 
     // Стартуем с уже известных данных — экран рисуется мгновенно,
     // свежие цифры приезжают следом.
