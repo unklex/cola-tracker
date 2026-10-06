@@ -138,4 +138,8 @@ cd backend && python -m pytest -q    # backend v3 (SQLite), temporary DB
 - No XML layouts - 100% Compose
 - ProGuard rules configured for release builds
 - Supports light and dark themes
-- Cleartext traffic allowed for local API development
+- HTTPS only in release (`https://cola.st77.ru`); cleartext allowed in **debug** builds only
+  (`app/src/debug/res/xml/network_security_config.xml`)
+- NEVER add `<domain-config>` to `network_security_config.xml`: Ktor CIO calls `checkServerTrusted`
+  without a hostname and Android then throws "Domain specific configurations require that hostname
+  aware checkServerTrusted ..." — every HTTPS request fails

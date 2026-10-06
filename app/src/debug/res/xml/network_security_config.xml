@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Только для debug-сборки: разрешён HTTP (эмулятор 10.0.2.2, localhost, локальный сервер).
+         Без <domain-config> — см. комментарий в основном конфиге. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

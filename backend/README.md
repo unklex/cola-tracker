@@ -30,6 +30,12 @@ curl -s http://127.0.0.1:8000/
 
 Откат: `docker compose down && systemctl enable --now colatracker` — старый `data.json` не тронут.
 
+## HTTPS
+
+API публикуется через nginx + Let's Encrypt на `https://cola.st77.ru` (конфиг — `nginx-cola.conf`, сертификат
+продлевается certbot автоматически). Контейнер слушает порт 8000; после перехода всех клиентов на HTTPS
+порт в `docker-compose.yml` стоит сузить до `127.0.0.1:8000:8000` и закрыть 8000 в файрволе.
+
 ## Бэкап
 
 `backup.sh` делает согласованный снимок базы (SQLite backup API) и архив фото, проверяет

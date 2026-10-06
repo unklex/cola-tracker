@@ -98,5 +98,3 @@ backend/.pytest_cache/
 .idea/
 .claude/
 
-# Локальный адрес реального сервера (cleartext) для debug-сборки
-app/src/debug/res/xml/network_security_config.xml
